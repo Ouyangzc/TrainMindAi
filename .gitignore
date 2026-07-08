@@ -25,6 +25,9 @@ yarn-error.log*
 .env.*.local
 !.env.example
 
+# 本地工具链
+.tools/
+
 # Python
 __pycache__/
 *.py[cod]
