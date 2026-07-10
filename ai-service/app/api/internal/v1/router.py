@@ -7,6 +7,7 @@ health 单独挂载、无需鉴权。
 from fastapi import APIRouter, Depends
 
 from app.api.internal.v1 import (
+    document_parse_tasks,
     documents,
     eval,
     health,
@@ -26,5 +27,5 @@ internal_router = APIRouter(
     prefix="/internal/v1",
     dependencies=[Depends(verify_internal_token)],
 )
-for _m in (documents, kb_versions, kb_tasks, qa, questions, eval):
+for _m in (documents, document_parse_tasks, kb_versions, kb_tasks, qa, questions, eval):
     internal_router.include_router(_m.router)

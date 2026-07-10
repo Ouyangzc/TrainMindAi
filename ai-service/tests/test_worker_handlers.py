@@ -1,9 +1,12 @@
 """Worker task handler tests."""
 
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.document_task import DocumentParseTask
 from app.models.kb import DocumentPage, KbBuildTask, KnowledgeChunk
 
 
@@ -36,16 +39,19 @@ async def test_parse_document_task_writes_markdown_pages(monkeypatch) -> None:
         def __init__(self, session) -> None:  # noqa: ANN001
             pass
 
-        async def get(self, task_id: int) -> KbBuildTask:
-            return KbBuildTask(
+        async def get(self, task_id: int) -> DocumentParseTask:
+            return DocumentParseTask(
                 id=task_id,
-                knowledge_base_version_id=3,
-                task_type="parse_document",
+                tenant_id=1,
+                document_id=11,
+                document_version_id=22,
                 status="running",
-                created_at=datetime.now(UTC),
+                create_time=datetime.now(UTC),
             )
 
-        async def update_progress(self, task: KbBuildTask, step: str, progress_value: int) -> None:
+        async def update_progress(
+            self, task: DocumentParseTask, step: str, progress_value: int
+        ) -> None:
             progress.append((step, progress_value))
 
     class FakeDocumentPageRepo:
@@ -60,7 +66,7 @@ async def test_parse_document_task_writes_markdown_pages(monkeypatch) -> None:
             saved_pages.extend(pages)
             return pages
 
-    monkeypatch.setattr(handlers, "KbBuildTaskRepo", FakeTaskRepo)
+    monkeypatch.setattr(handlers, "DocumentParseTaskRepo", FakeTaskRepo)
     monkeypatch.setattr(handlers, "DocumentPageRepo", FakeDocumentPageRepo)
 
     await handlers.parse_document_task(
@@ -71,7 +77,7 @@ async def test_parse_document_task_writes_markdown_pages(monkeypatch) -> None:
             "document_version_id": 22,
             "markdown_content": "# 第一章\n\n内容",
         },
-        session=FakeSession(),
+        session=cast(AsyncSession, FakeSession()),
     )
 
     assert deleted_versions == [22]
@@ -83,7 +89,7 @@ async def test_parse_document_task_writes_markdown_pages(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_document_task_with_minio(monkeypatch) -> None:
+async def test_parse_document_task_with_object_storage(monkeypatch) -> None:
     from app.workers import handlers
 
     progress: list[tuple[str, int]] = []
@@ -97,16 +103,19 @@ async def test_parse_document_task_with_minio(monkeypatch) -> None:
         def __init__(self, session) -> None:  # noqa: ANN001
             pass
 
-        async def get(self, task_id: int) -> KbBuildTask:
-            return KbBuildTask(
+        async def get(self, task_id: int) -> DocumentParseTask:
+            return DocumentParseTask(
                 id=task_id,
-                knowledge_base_version_id=3,
-                task_type="parse_document",
+                tenant_id=1,
+                document_id=11,
+                document_version_id=22,
                 status="running",
-                created_at=datetime.now(UTC),
+                create_time=datetime.now(UTC),
             )
 
-        async def update_progress(self, task: KbBuildTask, step: str, progress_value: int) -> None:
+        async def update_progress(
+            self, task: DocumentParseTask, step: str, progress_value: int
+        ) -> None:
             progress.append((step, progress_value))
 
     class FakeDocumentPageRepo:
@@ -139,9 +148,9 @@ async def test_parse_document_task_with_minio(monkeypatch) -> None:
             )
         ]
 
-    monkeypatch.setattr(handlers, "KbBuildTaskRepo", FakeTaskRepo)
+    monkeypatch.setattr(handlers, "DocumentParseTaskRepo", FakeTaskRepo)
     monkeypatch.setattr(handlers, "DocumentPageRepo", FakeDocumentPageRepo)
-    monkeypatch.setattr(handlers, "download_from_minio", fake_download)
+    monkeypatch.setattr(handlers, "download_from_object_storage", fake_download)
     monkeypatch.setattr(handlers, "parse_file", fake_parse)
     monkeypatch.setattr(handlers, "cleanup_download", lambda path: cleaned_paths.append(path))
 
@@ -155,12 +164,12 @@ async def test_parse_document_task_with_minio(monkeypatch) -> None:
             "file_ext": ".pdf",
             "checksum_md5": "abc123",
         },
-        session=FakeSession(),
+        session=cast(AsyncSession, FakeSession()),
     )
 
     assert download_calls == [
         {
-            "bucket": handlers.settings.minio_bucket,
+            "bucket": handlers.settings.object_storage_bucket,
             "object_name": "kb-docs/doc.pdf",
             "expected_md5": "abc123",
         }
@@ -229,7 +238,7 @@ async def test_build_chunk_task_creates_chunks_from_pages(monkeypatch) -> None:
         task_id=10,
         task_type="build_chunk",
         payload={"course_id": 2, "document_id": 10, "document_version_id": 20},
-        session=FakeSession(),
+        session=cast(AsyncSession, FakeSession()),
     )
 
     assert deleted_versions == [5]
@@ -244,7 +253,7 @@ async def test_build_keyword_index_task_updates_tsv_and_marks_ready(monkeypatch)
     from app.workers import handlers
 
     index_versions = []
-    session = FakeSession()
+    session = cast(AsyncSession, FakeSession())
 
     class FakeTaskRepo:
         def __init__(self, session) -> None:  # noqa: ANN001
@@ -305,7 +314,7 @@ async def test_build_keyword_index_task_updates_tsv_and_marks_ready(monkeypatch)
     assert index_versions[0].knowledge_base_version_id == 8
     assert index_versions[0].chunk_count == 1
     assert index_versions[0].status == "ready"
-    assert session.executed
+    assert cast(FakeSession, session).executed
 
 
 @pytest.mark.asyncio
@@ -333,6 +342,6 @@ async def test_dispatch_uses_concrete_handler(monkeypatch) -> None:
 
     monkeypatch.setattr(handlers, "KbBuildTaskRepo", FakeTaskRepo)
 
-    await dispatch(12, "structure_knowledge", {}, FakeSession())
+    await dispatch(12, "structure_knowledge", {}, cast(AsyncSession, FakeSession()))
 
     assert progress == [("structure_skipped", 100)]

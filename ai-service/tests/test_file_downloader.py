@@ -1,4 +1,4 @@
-"""MinIO downloader tests."""
+"""Object storage downloader tests."""
 
 import hashlib
 from pathlib import Path
@@ -9,7 +9,7 @@ from app.core.errors import AppError
 
 
 @pytest.mark.asyncio
-async def test_download_from_minio_returns_local_path(
+async def test_download_from_object_storage_returns_local_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.services.parsing import file_downloader
@@ -17,9 +17,9 @@ async def test_download_from_minio_returns_local_path(
     async def fake_get_file(bucket: str, object_name: str, local_path: str) -> None:
         Path(local_path).write_bytes(b"hello")
 
-    monkeypatch.setattr(file_downloader.MinIOClient, "get_file", fake_get_file)
+    monkeypatch.setattr(file_downloader.ObjectStorageClient, "get_file", fake_get_file)
 
-    path = await file_downloader.download_from_minio(
+    path = await file_downloader.download_from_object_storage(
         bucket="kb-docs",
         object_name="docs/test.pdf",
         expected_md5=hashlib.md5(b"hello").hexdigest(),  # noqa: S324
@@ -33,7 +33,9 @@ async def test_download_from_minio_returns_local_path(
 
 
 @pytest.mark.asyncio
-async def test_download_from_minio_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_download_from_object_storage_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import asyncio
 
     from app.services.parsing import file_downloader
@@ -41,10 +43,10 @@ async def test_download_from_minio_times_out(monkeypatch: pytest.MonkeyPatch) ->
     async def fake_get_file(bucket: str, object_name: str, local_path: str) -> None:
         await asyncio.sleep(0.05)
 
-    monkeypatch.setattr(file_downloader.MinIOClient, "get_file", fake_get_file)
+    monkeypatch.setattr(file_downloader.ObjectStorageClient, "get_file", fake_get_file)
 
     with pytest.raises(AppError) as exc:
-        await file_downloader.download_from_minio(
+        await file_downloader.download_from_object_storage(
             bucket="kb-docs",
             object_name="docs/test.pdf",
             timeout_seconds=0.001,
@@ -54,7 +56,7 @@ async def test_download_from_minio_times_out(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_download_from_minio_rejects_checksum_mismatch(
+async def test_download_from_object_storage_rejects_checksum_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.services.parsing import file_downloader
@@ -62,10 +64,10 @@ async def test_download_from_minio_rejects_checksum_mismatch(
     async def fake_get_file(bucket: str, object_name: str, local_path: str) -> None:
         Path(local_path).write_bytes(b"actual")
 
-    monkeypatch.setattr(file_downloader.MinIOClient, "get_file", fake_get_file)
+    monkeypatch.setattr(file_downloader.ObjectStorageClient, "get_file", fake_get_file)
 
     with pytest.raises(AppError) as exc:
-        await file_downloader.download_from_minio(
+        await file_downloader.download_from_object_storage(
             bucket="kb-docs",
             object_name="docs/test.pdf",
             expected_md5=hashlib.md5(b"expected").hexdigest(),  # noqa: S324

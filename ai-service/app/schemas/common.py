@@ -32,7 +32,6 @@ class TaskAccepted(BaseModel):
 class ParseDocumentRequest(BaseModel):
     """文档解析任务请求。"""
 
-    knowledge_base_version_id: int
     course_id: int
     document_id: int
     object_name: str | None = None

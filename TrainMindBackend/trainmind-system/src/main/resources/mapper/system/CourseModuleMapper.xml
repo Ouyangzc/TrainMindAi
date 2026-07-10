@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hezal.system.mapper.CourseModuleMapper">
+
+    <resultMap type="CourseModule" id="CourseModuleResult">
+        <id     property="id"          column="id"          />
+        <result property="tenantId"    column="tenant_id"   />
+        <result property="courseId"    column="course_id"   />
+        <result property="moduleCode"  column="module_code" />
+        <result property="moduleName"  column="module_name" />
+        <result property="description" column="description" />
+        <result property="sortOrder"   column="sort_order"  />
+        <result property="status"      column="status"      />
+        <result property="delFlag"     column="del_flag"    />
+        <result property="createBy"    column="create_by"   />
+        <result property="createTime"  column="create_time" />
+        <result property="updateBy"    column="update_by"   />
+        <result property="updateTime"  column="update_time" />
+        <result property="remark"      column="remark"      />
+    </resultMap>
+
+    <sql id="selectCourseModuleVo">
+        select id, tenant_id, course_id, module_code, module_name, description,
+               sort_order, status, del_flag, create_by, create_time, update_by, update_time, remark
+        from course_module
+    </sql>
+
+    <select id="selectCourseModuleList" parameterType="CourseModule" resultMap="CourseModuleResult">
+        <include refid="selectCourseModuleVo"/>
+        <where>
+            del_flag = '0'
+            <if test="tenantId != null">
+                and tenant_id = #{tenantId}
+            </if>
+            <if test="courseId != null">
+                and course_id = #{courseId}
+            </if>
+            <if test="moduleCode != null and moduleCode != ''">
+                and module_code like concat('%', #{moduleCode}, '%')
+            </if>
+            <if test="moduleName != null and moduleName != ''">
+                and module_name like concat('%', #{moduleName}, '%')
+            </if>
+            <if test="status != null and status != ''">
+                and status = #{status}
+            </if>
+        </where>
+        order by sort_order asc, id asc
+    </select>
+
+    <select id="selectCourseModuleById" parameterType="Long" resultMap="CourseModuleResult">
+        <include refid="selectCourseModuleVo"/>
+        where id = #{id} and del_flag = '0'
+    </select>
+
+    <insert id="insertCourseModule" parameterType="CourseModule" useGeneratedKeys="true" keyProperty="id">
+        insert into course_module(
+            tenant_id, course_id, module_code, module_name, description,
+            sort_order, status, del_flag, create_by, create_time, remark
+        ) values (
+            #{tenantId}, #{courseId}, #{moduleCode}, #{moduleName}, #{description},
+            #{sortOrder}, #{status}, '0', #{createBy}, now(), #{remark}
+        )
+    </insert>
+
+    <update id="updateCourseModule" parameterType="CourseModule">
+        update course_module
+        <set>
+            <if test="moduleCode != null">module_code = #{moduleCode},</if>
+            <if test="moduleName != null and moduleName != ''">module_name = #{moduleName},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = now()
+        </set>
+        where id = #{id} and del_flag = '0'
+    </update>
+
+    <update id="deleteCourseModuleById" parameterType="Long">
+        update course_module set del_flag = '2', update_time = now() where id = #{id}
+    </update>
+
+</mapper>

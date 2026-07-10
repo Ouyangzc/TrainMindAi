@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.kb import EmbeddingIndexVersion, KeywordIndexVersion
 from app.repositories.doc_repo import DocumentPageRepo, KnowledgeChunkRepo
+from app.repositories.document_task_repo import DocumentParseTaskRepo
 from app.repositories.embedding_repo import (
     EmbeddingIndexVersionRepo,
     KeywordIndexVersionRepo,
@@ -19,7 +20,10 @@ from app.services.chunking import process_title_chunk
 from app.services.embedding import run_embedding_pipeline
 from app.services.parsing import parse_markdown
 from app.services.parsing.dispatcher import parse_file
-from app.services.parsing.file_downloader import cleanup_download, download_from_minio
+from app.services.parsing.file_downloader import (
+    cleanup_download,
+    download_from_object_storage,
+)
 
 TaskHandler = Callable[[int, str, dict, AsyncSession], Awaitable[None]]
 
@@ -28,6 +32,15 @@ async def _update_progress(
     session: AsyncSession, task_id: int, step: str, progress: int
 ) -> None:
     repo = KbBuildTaskRepo(session)
+    task = await repo.get(task_id)
+    if task is not None:
+        await repo.update_progress(task, step, progress)
+
+
+async def _update_parse_progress(
+    session: AsyncSession, task_id: int, step: str, progress: int
+) -> None:
+    repo = DocumentParseTaskRepo(session)
     task = await repo.get(task_id)
     if task is not None:
         await repo.update_progress(task, step, progress)
@@ -43,7 +56,7 @@ def _require_int(payload: dict, key: str) -> int:
 async def parse_document_task(
     task_id: int, task_type: str, payload: dict, session: AsyncSession
 ) -> None:
-    """Parse markdown payload or MinIO object into ai.document_page rows."""
+    """Parse markdown payload or object storage file into ai.document_page rows."""
     document_id = _require_int(payload, "document_id")
     document_version_id = _require_int(payload, "document_version_id")
     object_name = payload.get("object_name")
@@ -55,14 +68,14 @@ async def parse_document_task(
     local_path: str | None = None
     try:
         if isinstance(object_name, str) and object_name.strip():
-            await _update_progress(session, task_id, "downloading", 5)
-            local_path = await download_from_minio(
-                bucket=settings.minio_bucket,
+            await _update_parse_progress(session, task_id, "downloading", 5)
+            local_path = await download_from_object_storage(
+                bucket=settings.object_storage_bucket,
                 object_name=object_name,
                 expected_md5=payload.get("checksum_md5"),
             )
             file_ext = payload.get("file_ext") or os.path.splitext(object_name)[1] or ".bin"
-            await _update_progress(session, task_id, "parsing", 30)
+            await _update_parse_progress(session, task_id, "parsing", 30)
             pages = await parse_file(
                 local_path,
                 str(file_ext),
@@ -72,17 +85,17 @@ async def parse_document_task(
         else:
             if not isinstance(markdown_content, str) or not markdown_content.strip():
                 raise ValueError("payload.markdown_content is empty")
-            await _update_progress(session, task_id, "parsing", 30)
+            await _update_parse_progress(session, task_id, "parsing", 30)
             pages = await parse_markdown(markdown_content, document_id, document_version_id)
 
         if not pages:
             raise ValueError("parse result is empty")
 
-        await _update_progress(session, task_id, "saving", 80)
+        await _update_parse_progress(session, task_id, "saving", 80)
         page_repo = DocumentPageRepo(session)
         await page_repo.delete_by_version(document_version_id)
         await page_repo.add_all(pages)
-        await _update_progress(session, task_id, "parsed", 100)
+        await _update_parse_progress(session, task_id, "parsed", 100)
     finally:
         cleanup_download(local_path)
 

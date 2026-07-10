@@ -76,7 +76,7 @@ async def test_parse_pptx_extracts_slide_text(tmp_path: Path) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[1])
     slide.shapes.title.text = "课程导论"
     slide.placeholders[1].text = "机器学习基础"
-    prs.save(file_path)
+    prs.save(str(file_path))
 
     pages = await parse_pptx(str(file_path), document_id=1, document_version_id=2)
 
@@ -97,7 +97,7 @@ async def test_parse_docx_splits_by_heading_1(tmp_path: Path) -> None:
     doc.add_paragraph("第一章内容")
     doc.add_heading("第二章", level=1)
     doc.add_paragraph("第二章内容")
-    doc.save(file_path)
+    doc.save(str(file_path))
 
     pages = await parse_docx(str(file_path), document_id=1, document_version_id=2)
 

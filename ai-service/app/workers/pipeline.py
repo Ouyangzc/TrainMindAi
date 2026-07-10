@@ -6,7 +6,6 @@ from app.workers.handlers import HANDLERS
 
 # task_type 取值见表结构文档 §kb_build_task
 TASK_TYPES = (
-    "parse_document",
     "structure_knowledge",
     "build_chunk",
     "build_embedding_index",

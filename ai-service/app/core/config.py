@@ -29,12 +29,13 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/1"
 
-    # 对象存储 MinIO
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
-    minio_bucket: str = "kb-docs"
-    minio_secure: bool = False
+    # 对象存储（S3 兼容）
+    object_storage_endpoint: str = "http://127.0.0.1:8333"
+    object_storage_access_key: str = "trainmind"
+    object_storage_secret_key: str = "trainmind-secret"
+    object_storage_bucket: str = "trainmind-docs"
+    object_storage_region: str = "us-east-1"
+    object_storage_path_style: bool = True
 
     # 向量库
     vector_store: str = "pgvector"  # pgvector / qdrant

@@ -9,7 +9,7 @@ from app.api.internal.v1 import documents
 from app.core.config import settings
 from app.core.db import get_session
 from app.main import app
-from app.models.kb import KbBuildTask
+from app.models.document_task import DocumentParseTask
 
 
 class FakeSession:
@@ -44,30 +44,29 @@ async def test_parse_document_creates_task_with_complete_payload(
 
         async def create_task(
             self,
-            knowledge_base_version_id: int,
-            task_type: str,
-            payload: dict | None = None,
-            created_by: int | None = None,
-        ) -> KbBuildTask:
-            captured["knowledge_base_version_id"] = knowledge_base_version_id
-            captured["task_type"] = task_type
+            document_id: int,
+            document_version_id: int,
+            payload: dict,
+            tenant_id: int = 1,
+        ) -> DocumentParseTask:
+            captured["document_id"] = document_id
+            captured["document_version_id"] = document_version_id
             captured["payload"] = payload
-            captured["created_by"] = created_by
-            return KbBuildTask(
+            return DocumentParseTask(
                 id=99,
-                knowledge_base_version_id=knowledge_base_version_id,
-                task_type=task_type,
+                tenant_id=tenant_id,
+                document_id=document_id,
+                document_version_id=document_version_id,
                 status="pending",
-                payload_json=payload or {},
+                payload_json=payload,
             )
 
-    monkeypatch.setattr(documents, "KbBuildTaskRepo", FakeTaskRepo)
+    monkeypatch.setattr(documents, "DocumentParseTaskRepo", FakeTaskRepo)
 
     response = await client.post(
         "/internal/v1/documents/3001/parse",
         headers={"X-Internal-Token": settings.internal_token},
         json={
-            "knowledge_base_version_id": 1001,
             "course_id": 10,
             "document_id": 2001,
             "object_name": "kb-docs/course-10/document-2001/v3001.pdf",
@@ -78,8 +77,8 @@ async def test_parse_document_creates_task_with_complete_payload(
 
     assert response.status_code == 200
     assert response.json() == {"task_id": 99, "status": "pending"}
-    assert captured["knowledge_base_version_id"] == 1001
-    assert captured["task_type"] == "parse_document"
+    assert captured["document_id"] == 2001
+    assert captured["document_version_id"] == 3001
     assert captured["payload"] == {
         "course_id": 10,
         "document_id": 2001,
@@ -99,7 +98,6 @@ async def test_parse_document_requires_object_name_or_markdown(
         "/internal/v1/documents/3001/parse",
         headers={"X-Internal-Token": settings.internal_token},
         json={
-            "knowledge_base_version_id": 1001,
             "course_id": 10,
             "document_id": 2001,
         },

@@ -1,4 +1,4 @@
-"""MinIO file downloader for parsing tasks."""
+"""S3-compatible file downloader for parsing tasks."""
 
 import asyncio
 import functools
@@ -7,37 +7,43 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
-from minio import Minio
+import boto3
+from botocore.config import Config
 
 from app.core.config import settings
 from app.core.errors import AppError
 
 
-class MinIOClient:
-    """Lazy MinIO client wrapper."""
+class ObjectStorageClient:
+    """Lazy S3-compatible object storage client wrapper."""
 
-    _client: Minio | None = None
+    _client: Any = None
 
     @classmethod
-    def get_client(cls) -> Minio:
+    def get_client(cls) -> Any:
         if cls._client is None:
-            cls._client = Minio(
-                settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=settings.minio_secret_key,
-                secure=settings.minio_secure,
+            addressing_style = "path" if settings.object_storage_path_style else "auto"
+            s3_config = Config(s3={"addressing_style": addressing_style})
+            cls._client = boto3.client(
+                "s3",
+                endpoint_url=settings.object_storage_endpoint,
+                aws_access_key_id=settings.object_storage_access_key,
+                aws_secret_access_key=settings.object_storage_secret_key,
+                region_name=settings.object_storage_region,
+                config=s3_config,
             )
         return cls._client
 
     @staticmethod
     async def get_file(bucket: str, object_name: str, local_path: str) -> None:
-        """Download object from MinIO to local path."""
-        client = MinIOClient.get_client()
+        """Download object from S3-compatible storage to local path."""
+        client = ObjectStorageClient.get_client()
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
-            functools.partial(client.fget_object, bucket, object_name, local_path),
+            functools.partial(client.download_file, bucket, object_name, local_path),
         )
 
 
@@ -58,7 +64,7 @@ def cleanup_download(local_path: str | None) -> None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-async def download_from_minio(
+async def download_from_object_storage(
     bucket: str,
     object_name: str,
     expected_md5: str | None = None,
@@ -71,14 +77,14 @@ async def download_from_minio(
 
     try:
         await asyncio.wait_for(
-            MinIOClient.get_file(bucket, object_name, local_path),
+            ObjectStorageClient.get_file(bucket, object_name, local_path),
             timeout=timeout_seconds,
         )
     except TimeoutError as exc:
         cleanup_download(local_path)
         raise AppError(
             "FILE_DOWNLOAD_TIMEOUT",
-            f"MinIO 下载超时 ({timeout_seconds}s)",
+            f"对象存储下载超时 ({timeout_seconds}s)",
             http_status=504,
         ) from exc
     except Exception:

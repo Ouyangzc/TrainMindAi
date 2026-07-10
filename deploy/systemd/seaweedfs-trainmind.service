@@ -1,0 +1,18 @@
+[Unit]
+Description=TrainMindAi SeaweedFS local object storage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/oyang/code/TrainMindAi/repo
+Environment=AWS_ACCESS_KEY_ID=trainmind
+Environment=AWS_SECRET_ACCESS_KEY=trainmind-secret
+Environment=S3_BUCKET=trainmind-docs
+ExecStart=/home/oyang/code/TrainMindAi/repo/.tools/seaweedfs/weed mini -dir=/home/oyang/code/TrainMindAi/repo/.tools/seaweedfs-data -ip=127.0.0.1 -ip.bind=127.0.0.1 -master.port=9333 -volume.port=9340 -filer.port=8888 -s3.port=8333 -s3.port.iceberg=0 -webdav=false -admin.password=trainmind-admin
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target
