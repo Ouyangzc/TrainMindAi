@@ -89,6 +89,32 @@ export const constantRoutes = [
         meta: { title: '个人中心', icon: 'user' }
       }
     ]
+  },
+  {
+    path: '/course',
+    component: Layout,
+    redirect: '/course/index',
+    children: [
+      {
+        path: 'index',
+        component: () => import('@/views/course/index.vue'),
+        name: 'Course',
+        meta: { title: '课程管理', icon: 'education' }
+      }
+    ]
+  },
+  {
+    path: '/course/detail',
+    component: Layout,
+    hidden: true,
+    children: [
+      {
+        path: ':courseId(\\d+)',
+        component: () => import('@/views/course/detail.vue'),
+        name: 'CourseDetail',
+        meta: { title: '课程详情', activeMenu: '/course/index' }
+      }
+    ]
   }
 ]
 
