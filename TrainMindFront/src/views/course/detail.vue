@@ -5,15 +5,15 @@
         <div class="breadcrumb-line">
           <el-button link icon="ArrowLeft" @click="goBack">课程管理</el-button>
           <span>/</span>
-          <span>{{ course?.code }}</span>
+          <span>{{ course?.courseCode }}</span>
         </div>
-        <h2>{{ course?.name }}</h2>
+        <h2>{{ course?.courseName }}</h2>
         <div class="header-meta">
           <el-tag :type="optionTagType(courseStatusOptions, course?.status || '')">
             {{ optionLabel(courseStatusOptions, course?.status || '') }}
           </el-tag>
           <span>负责人：{{ course?.ownerName }}</span>
-          <span>分类：{{ course?.category }}</span>
+          <span>分类：{{ course?.courseCategory || '-' }}</span>
           <span>更新时间：{{ course?.updateTime }}</span>
         </div>
       </div>
@@ -29,8 +29,8 @@
           <div class="info-panel">
             <div class="panel-title">课程信息</div>
             <el-descriptions :column="2" border>
-              <el-descriptions-item label="课程编码">{{ course?.code }}</el-descriptions-item>
-              <el-descriptions-item label="课程分类">{{ course?.category }}</el-descriptions-item>
+              <el-descriptions-item label="课程编码">{{ course?.courseCode }}</el-descriptions-item>
+              <el-descriptions-item label="课程分类">{{ course?.courseCategory || '-' }}</el-descriptions-item>
               <el-descriptions-item label="主负责人">{{ course?.ownerName }}</el-descriptions-item>
               <el-descriptions-item label="开课日期">{{ course?.startDate }}</el-descriptions-item>
               <el-descriptions-item label="课程状态">
@@ -38,26 +38,29 @@
                   {{ optionLabel(courseStatusOptions, course?.status || '') }}
                 </el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="当前知识库">{{ course?.currentVersion }} / {{ course?.currentVersionStatus }}</el-descriptions-item>
+              <el-descriptions-item label="当前知识库">
+                {{ course?.currentVersion || '-' }}
+                <span v-if="course?.currentVersionStatus"> / {{ course.currentVersionStatus }}</span>
+              </el-descriptions-item>
               <el-descriptions-item label="备注" :span="2">{{ course?.remark }}</el-descriptions-item>
             </el-descriptions>
           </div>
           <div class="metric-panel">
             <div class="metric-item">
               <span>模块数</span>
-              <strong>{{ courseModules.length }}</strong>
+              <strong>{{ course?.moduleCount || courseModules.length }}</strong>
             </div>
             <div class="metric-item">
               <span>资料数</span>
-              <strong>{{ courseDocuments.length }}</strong>
+              <strong>{{ course?.documentCount || courseDocuments.length }}</strong>
             </div>
             <div class="metric-item">
               <span>已解析</span>
-              <strong>{{ parsedDocumentCount }}</strong>
+              <strong>{{ course?.parsedCount || parsedDocumentCount }}</strong>
             </div>
             <div class="metric-item">
               <span>成员数</span>
-              <strong>{{ courseMembers.length }}</strong>
+              <strong>{{ course?.studentCount || courseMembers.length }}</strong>
             </div>
           </div>
         </div>
@@ -72,7 +75,9 @@
           <el-table-column label="排序" prop="sortOrder" width="90" align="center" />
           <el-table-column label="模块编码" prop="moduleCode" width="120" />
           <el-table-column label="模块名称" prop="moduleName" min-width="180" />
-          <el-table-column label="资料数" prop="documentCount" width="90" align="center" />
+          <el-table-column label="资料数" width="90" align="center">
+            <template #default="scope">{{ moduleDocumentCount(scope.row.id) }}</template>
+          </el-table-column>
           <el-table-column label="状态" prop="status" width="90" align="center">
             <template #default="scope">
               <el-tag :type="optionTagType(moduleStatusOptions, scope.row.status)">
@@ -153,7 +158,7 @@
               <el-table-column label="资料名称" min-width="220" :show-overflow-tooltip="true">
                 <template #default="scope">
                   <div class="document-title">
-                    <el-tag size="small" effect="plain">{{ scope.row.documentType.toUpperCase() }}</el-tag>
+                    <el-tag size="small" effect="plain">{{ (scope.row.documentType || '-').toUpperCase() }}</el-tag>
                     <span>{{ scope.row.title }}</span>
                   </div>
                 </template>
@@ -162,7 +167,7 @@
                 <template #default="scope">{{ moduleName(scope.row.moduleId) }}</template>
               </el-table-column>
               <el-table-column label="版本" width="80" align="center">
-                <template #default="scope">V{{ scope.row.latestVersionNo }}</template>
+                <template #default="scope">V{{ scope.row.versionNo || '-' }}</template>
               </el-table-column>
               <el-table-column label="解析状态" width="110" align="center">
                 <template #default="scope">
@@ -180,8 +185,10 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="大小" prop="fileSize" width="100" />
-              <el-table-column label="上传人" prop="uploader" width="110" />
+              <el-table-column label="大小" width="100">
+                <template #default="scope">{{ formatFileSize(scope.row.fileSize) }}</template>
+              </el-table-column>
+              <el-table-column label="上传人" prop="createBy" width="110" />
               <el-table-column label="更新时间" prop="updateTime" width="170" />
               <el-table-column label="操作" width="330" align="center" class-name="small-padding fixed-width">
                 <template #default="scope">
@@ -202,15 +209,15 @@
           <div class="knowledge-status">
             <div>
               <span class="muted">知识库名称</span>
-              <strong>{{ course?.name }}知识库</strong>
+              <strong>{{ course?.courseName }}知识库</strong>
             </div>
             <div>
               <span class="muted">当前发布版本</span>
-              <strong>{{ course?.currentVersion }}</strong>
+              <strong>{{ course?.currentVersion || '-' }}</strong>
             </div>
             <div>
               <span class="muted">活动版本状态</span>
-              <el-tag type="success">{{ course?.currentVersionStatus }}</el-tag>
+              <el-tag type="success">{{ course?.currentVersionStatus || '未发布' }}</el-tag>
             </div>
             <el-button type="primary" disabled>创建草稿</el-button>
           </div>
@@ -300,7 +307,7 @@
     </el-dialog>
 
     <el-dialog title="版本历史" v-model="versionOpen" width="720px" append-to-body>
-      <el-table :data="versionRows">
+      <el-table v-loading="versionLoading" :data="versionRows">
         <el-table-column label="版本" prop="versionNo" width="80" align="center" />
         <el-table-column label="文件名" prop="filename" min-width="220" />
         <el-table-column label="状态" prop="status" width="110" align="center">
@@ -323,34 +330,51 @@
 </template>
 
 <script setup lang="ts" name="CourseDetail">
-import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Collection, Document, Folder, UploadFilled } from '@element-plus/icons-vue'
 import {
-  courses,
-  modules,
-  documents,
+  getCourse,
+  listCourseDocument,
+  listCourseDocumentVersion,
+  listCourseModule
+} from '@/api/course'
+import type {
+  Course,
+  CourseDocument,
+  CourseDocumentVersion,
+  CourseModule,
+  VersionStatus
+} from '@/types'
+import {
   members,
   courseStatusOptions,
   moduleStatusOptions,
   versionStatusOptions,
   memberRoleOptions,
   optionLabel,
-  optionTagType,
-  type CourseDocumentItem,
-  type VersionStatus
+  optionTagType
 } from './mock'
 
 const route = useRoute()
 const router = useRouter()
 const courseId = computed(() => Number(route.params.courseId || 1001))
-const course = computed(() => courses.find(item => item.id === courseId.value) || courses[0])
+const course = ref<Course>()
 const activeTab = ref('basic')
 const selectedModuleKey = ref('all')
 const uploadOpen = ref(false)
 const uploadTitle = ref('上传资料')
 const versionOpen = ref(false)
-const currentDocument = ref<CourseDocumentItem | null>(null)
+const versionLoading = ref(false)
+const currentDocument = ref<CourseDocument | null>(null)
+const courseModules = ref<CourseModule[]>([])
+const courseDocuments = ref<CourseDocument[]>([])
+const versionRows = ref<Array<{
+  versionNo: string
+  filename: string
+  status: VersionStatus
+  fileSize: string
+  updateTime?: string
+}>>([])
 
 const documentQuery = reactive({
   keyword: '',
@@ -364,10 +388,8 @@ const uploadForm = reactive({
   remark: ''
 })
 
-const courseModules = computed(() => modules.filter(item => item.courseId === course.value.id))
-const normalModules = computed(() => courseModules.value.filter(item => item.id !== 0))
-const courseDocuments = computed(() => documents.filter(item => item.courseId === course.value.id))
-const courseMembers = computed(() => members.filter(item => item.courseId === course.value.id))
+const normalModules = computed(() => courseModules.value)
+const courseMembers = computed(() => members.filter(item => item.courseId === courseId.value))
 const parsedDocumentCount = computed(() => courseDocuments.value.filter(item => item.versionStatus === 'parsed').length)
 
 const filteredDocuments = computed(() => {
@@ -380,26 +402,10 @@ const filteredDocuments = computed(() => {
     const matchKeyword =
       !keyword ||
       item.title.toLowerCase().includes(keyword) ||
-      item.originalFilename.toLowerCase().includes(keyword)
+      (item.originalFilename || '').toLowerCase().includes(keyword)
     const matchType = !documentQuery.documentType || item.documentType === documentQuery.documentType
     const matchStatus = !documentQuery.versionStatus || item.versionStatus === documentQuery.versionStatus
     return matchModule && matchKeyword && matchType && matchStatus
-  })
-})
-
-const versionRows = computed(() => {
-  if (!currentDocument.value) {
-    return []
-  }
-  return Array.from({ length: currentDocument.value.latestVersionNo }).map((_, index) => {
-    const versionNo = currentDocument.value!.latestVersionNo - index
-    return {
-      versionNo: `V${versionNo}`,
-      filename: currentDocument.value!.originalFilename,
-      status: versionNo === currentDocument.value!.latestVersionNo ? currentDocument.value!.versionStatus : 'parsed',
-      fileSize: currentDocument.value!.fileSize,
-      updateTime: currentDocument.value!.updateTime
-    }
   })
 })
 
@@ -409,6 +415,32 @@ function moduleName(moduleId: number | null) {
   }
   const item = courseModules.value.find(module => module.id === moduleId)
   return item ? `${item.moduleCode} ${item.moduleName}` : '-'
+}
+
+function moduleDocumentCount(moduleId?: number) {
+  return courseDocuments.value.filter(item => item.moduleId === moduleId).length
+}
+
+function formatFileSize(size?: number) {
+  if (!size) {
+    return '-'
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+function loadDetail() {
+  getCourse(courseId.value).then(response => {
+    course.value = response.data
+  })
+  listCourseModule(courseId.value).then(response => {
+    courseModules.value = response.data || []
+  })
+  listCourseDocument(courseId.value).then(response => {
+    courseDocuments.value = response.data || []
+  })
 }
 
 function resetDocumentQuery() {
@@ -424,21 +456,35 @@ function openUploadDialog(mode: 'new' | 'version') {
 
 function submitUpload() {
   uploadOpen.value = false
-  ElMessage.success(`${uploadTitle.value}：页面效果阶段，待确认后接入后端`)
+  handleMockAction(uploadTitle.value)
 }
 
-function openVersionDialog(row: CourseDocumentItem) {
+function openVersionDialog(row: CourseDocument) {
   currentDocument.value = row
   versionOpen.value = true
+  versionLoading.value = true
+  listCourseDocumentVersion(courseId.value, row.id!).then(response => {
+    versionRows.value = (response.data || []).map((item: CourseDocumentVersion) => ({
+      versionNo: `V${item.versionNo || '-'}`,
+      filename: item.originalFilename || '-',
+      status: item.status || 'uploaded',
+      fileSize: formatFileSize(item.fileSize),
+      updateTime: item.createTime
+    }))
+  }).finally(() => {
+    versionLoading.value = false
+  })
 }
 
 function handleMockAction(name: string) {
-  ElMessage.info(`${name}：页面效果阶段，待确认后接入后端`)
+  console.info(`${name}：下一步接入具体操作`)
 }
 
 function goBack() {
   router.push('/course')
 }
+
+loadDetail()
 </script>
 
 <style scoped lang="scss">

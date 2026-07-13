@@ -1,17 +1,17 @@
 <template>
   <div class="app-container course-page">
     <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch" label-width="68px">
-      <el-form-item label="课程名称" prop="keyword">
+      <el-form-item label="课程名称" prop="courseName">
         <el-input
-          v-model="queryParams.keyword"
+          v-model="queryParams.courseName"
           placeholder="请输入课程名称或编码"
           clearable
           style="width: 240px"
           @keyup.enter="handleQuery"
         />
       </el-form-item>
-      <el-form-item label="课程分类" prop="category">
-        <el-select v-model="queryParams.category" placeholder="课程分类" clearable style="width: 200px">
+      <el-form-item label="课程分类" prop="courseCategory">
+        <el-select v-model="queryParams.courseCategory" placeholder="课程分类" clearable style="width: 200px">
           <el-option label="航空维修培训" value="航空维修培训" />
           <el-option label="通用安全课程" value="通用安全课程" />
         </el-select>
@@ -48,7 +48,7 @@
     <div class="course-summary">
       <div class="summary-item">
         <span class="summary-label">课程总数</span>
-        <strong>{{ courses.length }}</strong>
+        <strong>{{ total }}</strong>
       </div>
       <div class="summary-item">
         <span class="summary-label">启用课程</span>
@@ -64,15 +64,15 @@
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="pagedList" @selection-change="handleSelectionChange">
+    <el-table v-loading="loading" :data="courseList" @selection-change="handleSelectionChange">
       <el-table-column type="selection" width="55" align="center" />
-      <el-table-column label="课程编码" prop="code" width="130" />
+      <el-table-column label="课程编码" prop="courseCode" width="130" />
       <el-table-column label="课程名称" min-width="230" :show-overflow-tooltip="true">
         <template #default="scope">
-          <el-button link type="primary" @click="goDetail(scope.row)">{{ scope.row.name }}</el-button>
+          <el-button link type="primary" @click="goDetail(scope.row)">{{ scope.row.courseName }}</el-button>
         </template>
       </el-table-column>
-      <el-table-column label="分类" prop="category" width="140" />
+      <el-table-column label="分类" prop="courseCategory" width="140" />
       <el-table-column label="负责人" prop="ownerName" width="110" />
       <el-table-column label="状态" prop="status" width="90" align="center">
         <template #default="scope">
@@ -90,8 +90,10 @@
       <el-table-column label="学员" prop="studentCount" width="90" align="center" />
       <el-table-column label="当前知识库" width="130" align="center">
         <template #default="scope">
-          <span>{{ scope.row.currentVersion }}</span>
-          <el-tag size="small" type="success" class="ml6">{{ scope.row.currentVersionStatus }}</el-tag>
+          <span>{{ scope.row.currentVersion || '-' }}</span>
+          <el-tag v-if="scope.row.currentVersionStatus" size="small" type="success" class="ml6">
+            {{ scope.row.currentVersionStatus }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="更新时间" prop="updateTime" width="170" />
@@ -105,25 +107,23 @@
     </el-table>
 
     <pagination
-      v-show="filteredList.length > 0"
-      :total="filteredList.length"
+      v-show="total > 0"
+      :total="total"
       v-model:page="queryParams.pageNum"
       v-model:limit="queryParams.pageSize"
-      @pagination="handleQuery"
+      @pagination="getList"
     />
   </div>
 </template>
 
 <script setup lang="ts" name="Course">
-import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
+import { listCourse } from '@/api/course'
+import type { Course, CourseQueryParams } from '@/types'
 import {
-  courses,
   courseStatusOptions,
   optionLabel,
-  optionTagType,
-  type CourseItem,
-  type CourseStatus
+  optionTagType
 } from './mock'
 
 const { proxy } = getCurrentInstance()
@@ -134,36 +134,34 @@ const showSearch = ref(true)
 const ids = ref<number[]>([])
 const single = ref(true)
 const multiple = ref(true)
+const total = ref(0)
+const courseList = ref<Course[]>([])
 
-const queryParams = reactive({
+const queryParams = reactive<CourseQueryParams>({
   pageNum: 1,
   pageSize: 10,
-  keyword: '',
-  category: '',
-  status: '' as CourseStatus | ''
+  courseName: '',
+  courseCategory: '',
+  status: ''
 })
 
-const filteredList = computed(() => {
-  const keyword = queryParams.keyword.trim().toLowerCase()
-  return courses.filter(item => {
-    const matchKeyword = !keyword || item.name.toLowerCase().includes(keyword) || item.code.toLowerCase().includes(keyword)
-    const matchCategory = !queryParams.category || item.category === queryParams.category
-    const matchStatus = !queryParams.status || item.status === queryParams.status
-    return matchKeyword && matchCategory && matchStatus
+const activeCourseCount = computed(() => courseList.value.filter(item => item.status === 'active').length)
+const documentTotal = computed(() => courseList.value.reduce((sum, item) => sum + (item.documentCount || 0), 0))
+const studentTotal = computed(() => courseList.value.reduce((sum, item) => sum + (item.studentCount || 0), 0))
+
+function getList() {
+  loading.value = true
+  listCourse(queryParams).then(response => {
+    courseList.value = response.rows || []
+    total.value = response.total || 0
+  }).finally(() => {
+    loading.value = false
   })
-})
-
-const pagedList = computed(() => {
-  const start = (queryParams.pageNum - 1) * queryParams.pageSize
-  return filteredList.value.slice(start, start + queryParams.pageSize)
-})
-
-const activeCourseCount = computed(() => courses.filter(item => item.status === 'active').length)
-const documentTotal = computed(() => courses.reduce((sum, item) => sum + item.documentCount, 0))
-const studentTotal = computed(() => courses.reduce((sum, item) => sum + item.studentCount, 0))
+}
 
 function handleQuery() {
   queryParams.pageNum = 1
+  getList()
 }
 
 function resetQuery() {
@@ -171,19 +169,21 @@ function resetQuery() {
   handleQuery()
 }
 
-function handleSelectionChange(selection: CourseItem[]) {
-  ids.value = selection.map(item => item.id)
+function handleSelectionChange(selection: Course[]) {
+  ids.value = selection.map(item => item.id!)
   single.value = selection.length !== 1
   multiple.value = selection.length === 0
 }
 
-function goDetail(row: CourseItem) {
+function goDetail(row: Course) {
   router.push(`/course/detail/${row.id}`)
 }
 
 function handleMockAction(name: string) {
-  ElMessage.info(`${name}：页面效果阶段，待确认后接入后端`)
+  proxy?.$modal.msg(`${name}：下一步接入具体表单操作`)
 }
+
+getList()
 </script>
 
 <style scoped lang="scss">

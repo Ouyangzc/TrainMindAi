@@ -12,8 +12,10 @@ create table if not exists course (
   tenant_id         int8            default 1 not null,
   course_code       varchar(64)     default '',
   course_name       varchar(200)    not null,
+  course_category   varchar(100)    default '',
   description       varchar(1000)   default null,
   owner_user_id     int8            default null,
+  start_date        date            default null,
   status            varchar(20)     default 'draft' not null,
   sort_order        int4            default 0,
   del_flag          char(1)         default '0',
@@ -24,14 +26,21 @@ create table if not exists course (
   remark            varchar(500)    default null,
   primary key (id)
 );
+
+alter table course
+  add column if not exists course_category varchar(100) default '',
+  add column if not exists start_date date default null;
+
 comment on table course                  is '课程表';
 comment on column course.id              is '课程ID';
 comment on column course.tenant_id       is '租户ID';
 comment on column course.course_code     is '课程编码';
 comment on column course.course_name     is '课程名称';
+comment on column course.course_category is '课程分类';
 comment on column course.description     is '课程简介';
 comment on column course.owner_user_id   is '课程讲师或负责人用户ID';
-comment on column course.status          is '课程状态（draft草稿 active正常 disabled停用）';
+comment on column course.start_date      is '开课日期';
+comment on column course.status          is '课程状态（draft草稿 active正常 disabled停用 archived归档）';
 comment on column course.sort_order      is '显示顺序';
 comment on column course.del_flag        is '删除标志（0代表存在 2代表删除）';
 comment on column course.create_by       is '创建者';
@@ -306,6 +315,7 @@ values
   (1, '草稿', 'draft', 'trainmind_course_status', '', 'info', 'Y', '0', 'admin', now(), '', null, '课程草稿'),
   (2, '正常', 'active', 'trainmind_course_status', '', 'success', 'N', '0', 'admin', now(), '', null, '课程正常'),
   (3, '停用', 'disabled', 'trainmind_course_status', '', 'danger', 'N', '0', 'admin', now(), '', null, '课程停用'),
+  (4, '归档', 'archived', 'trainmind_course_status', '', 'info', 'N', '0', 'admin', now(), '', null, '课程归档'),
 
   (1, '正常', 'active', 'trainmind_course_module_status', '', 'success', 'Y', '0', 'admin', now(), '', null, '课程模块正常'),
   (2, '停用', 'disabled', 'trainmind_course_module_status', '', 'danger', 'N', '0', 'admin', now(), '', null, '课程模块停用'),

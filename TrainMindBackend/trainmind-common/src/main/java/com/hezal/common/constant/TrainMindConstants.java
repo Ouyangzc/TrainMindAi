@@ -16,6 +16,9 @@ public class TrainMindConstants
     /** 删除标志：删除 */
     public static final String DEL_FLAG_DELETE = "2";
 
+    /** 课程状态：正常 */
+    public static final String COURSE_STATUS_ACTIVE = "active";
+
     /** 课程资料状态：正常 */
     public static final String COURSE_DOCUMENT_STATUS_ACTIVE = "active";
 

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hezal.system.mapper.CourseMapper">
+
+    <resultMap type="Course" id="CourseResult">
+        <id     property="id"                  column="id"                     />
+        <result property="tenantId"            column="tenant_id"              />
+        <result property="courseCode"          column="course_code"            />
+        <result property="courseName"          column="course_name"            />
+        <result property="courseCategory"      column="course_category"        />
+        <result property="description"         column="description"            />
+        <result property="ownerUserId"         column="owner_user_id"          />
+        <result property="ownerName"           column="owner_name"             />
+        <result property="startDate"           column="start_date"             />
+        <result property="status"              column="status"                 />
+        <result property="sortOrder"           column="sort_order"             />
+        <result property="delFlag"             column="del_flag"               />
+        <result property="createBy"            column="create_by"              />
+        <result property="createTime"          column="create_time"            />
+        <result property="updateBy"            column="update_by"              />
+        <result property="updateTime"          column="update_time"            />
+        <result property="remark"              column="remark"                 />
+        <result property="moduleCount"         column="module_count"           />
+        <result property="documentCount"       column="document_count"         />
+        <result property="parsedCount"         column="parsed_count"           />
+        <result property="studentCount"        column="student_count"          />
+        <result property="currentVersion"      column="current_version"        />
+        <result property="currentVersionStatus" column="current_version_status"/>
+    </resultMap>
+
+    <sql id="selectCourseVo">
+        select c.id, c.tenant_id, c.course_code, c.course_name, c.course_category,
+               c.description, c.owner_user_id, u.nick_name as owner_name,
+               c.start_date, c.status, c.sort_order, c.del_flag,
+               c.create_by, c.create_time, c.update_by, c.update_time, c.remark,
+               coalesce(m.module_count, 0) as module_count,
+               coalesce(d.document_count, 0) as document_count,
+               coalesce(d.parsed_count, 0) as parsed_count,
+               0 as student_count,
+               null as current_version,
+               null as current_version_status
+        from course c
+        left join sys_user u on u.user_id = c.owner_user_id
+        left join (
+            select tenant_id, course_id, count(1) as module_count
+            from course_module
+            where del_flag = '0'
+            group by tenant_id, course_id
+        ) m on m.tenant_id = c.tenant_id and m.course_id = c.id
+        left join (
+            select d.tenant_id, d.course_id,
+                   count(1) as document_count,
+                   sum(case when v.status = 'parsed' then 1 else 0 end) as parsed_count
+            from course_document d
+            left join course_document_version v on v.id = d.latest_version_id and v.del_flag = '0'
+            where d.del_flag = '0'
+            group by d.tenant_id, d.course_id
+        ) d on d.tenant_id = c.tenant_id and d.course_id = c.id
+    </sql>
+
+    <select id="selectCourseList" parameterType="Course" resultMap="CourseResult">
+        <include refid="selectCourseVo"/>
+        <where>
+            c.del_flag = '0'
+            <if test="tenantId != null">and c.tenant_id = #{tenantId}</if>
+            <if test="courseCode != null and courseCode != ''">and c.course_code like concat('%', #{courseCode}, '%')</if>
+            <if test="courseName != null and courseName != ''">and c.course_name like concat('%', #{courseName}, '%')</if>
+            <if test="courseCategory != null and courseCategory != ''">and c.course_category = #{courseCategory}</if>
+            <if test="status != null and status != ''">and c.status = #{status}</if>
+        </where>
+        order by c.sort_order asc, c.id desc
+    </select>
+
+    <select id="selectCourseById" parameterType="Long" resultMap="CourseResult">
+        <include refid="selectCourseVo"/>
+        where c.id = #{id} and c.del_flag = '0'
+    </select>
+
+    <select id="selectCourseByCode" resultMap="CourseResult">
+        <include refid="selectCourseVo"/>
+        where c.tenant_id = #{tenantId}
+          and c.course_code = #{courseCode}
+          and c.del_flag = '0'
+    </select>
+
+    <insert id="insertCourse" parameterType="Course" useGeneratedKeys="true" keyProperty="id">
+        insert into course(
+            tenant_id, course_code, course_name, course_category, description,
+            owner_user_id, start_date, status, sort_order,
+            del_flag, create_by, create_time, remark
+        ) values (
+            #{tenantId}, #{courseCode}, #{courseName}, #{courseCategory}, #{description},
+            #{ownerUserId}, #{startDate}, #{status}, #{sortOrder},
+            '0', #{createBy}, now(), #{remark}
+        )
+    </insert>
+
+    <update id="updateCourse" parameterType="Course">
+        update course
+        <set>
+            <if test="courseCode != null">course_code = #{courseCode},</if>
+            <if test="courseName != null and courseName != ''">course_name = #{courseName},</if>
+            <if test="courseCategory != null">course_category = #{courseCategory},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="ownerUserId != null">owner_user_id = #{ownerUserId},</if>
+            <if test="startDate != null">start_date = #{startDate},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = now()
+        </set>
+        where id = #{id} and del_flag = '0'
+    </update>
+
+    <update id="deleteCourseById" parameterType="Long">
+        update course set del_flag = '2', update_time = now()
+        where id = #{id} and del_flag = '0'
+    </update>
+
+    <select id="countChildren" parameterType="Long" resultType="Integer">
+        select
+            (select count(1) from course_module where course_id = #{id} and del_flag = '0')
+          + (select count(1) from course_document where course_id = #{id} and del_flag = '0')
+    </select>
+</mapper>

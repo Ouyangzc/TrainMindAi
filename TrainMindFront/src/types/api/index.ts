@@ -17,6 +17,9 @@ export * from "./system/dict";
 export * from "./system/config";
 export * from "./system/notice";
 
+// Course 模块
+export * from "./course";
+
 // monitor 模块
 export * from "./monitor/cache";
 export * from "./monitor/job";
