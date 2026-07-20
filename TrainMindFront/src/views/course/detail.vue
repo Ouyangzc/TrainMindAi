@@ -18,8 +18,8 @@
         </div>
       </div>
       <div class="header-actions">
-        <el-button icon="Edit" @click="handleMockAction('编辑课程')">编辑</el-button>
-        <el-button type="primary" icon="Upload" @click="activeTab = 'documents'">上传资料</el-button>
+        <el-button v-hasPermi="['course:course:edit']" icon="Edit" @click="handleMockAction('编辑课程')">编辑</el-button>
+        <el-button v-if="canViewDocuments" v-hasPermi="['course:document:upload']" type="primary" icon="Upload" @click="activeTab = 'documents'">上传资料</el-button>
       </div>
     </div>
 
@@ -66,10 +66,10 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="模块管理" name="modules">
+      <el-tab-pane v-if="canViewModules" label="模块管理" name="modules">
         <div class="tab-toolbar">
-          <el-button type="primary" plain icon="Plus" @click="openModuleDialog()">新增模块</el-button>
-          <el-button icon="Sort" :loading="savingModuleSort" @click="saveModuleSort">保存排序</el-button>
+          <el-button v-hasPermi="['course:module:add']" type="primary" plain icon="Plus" @click="openModuleDialog()">新增模块</el-button>
+          <el-button v-hasPermi="['course:module:edit']" icon="Sort" :loading="savingModuleSort" @click="saveModuleSort">保存排序</el-button>
         </div>
         <el-table :data="courseModules" row-key="id">
           <el-table-column label="排序" width="130" align="center">
@@ -92,8 +92,9 @@
           <el-table-column label="备注" prop="remark" min-width="220" :show-overflow-tooltip="true" />
           <el-table-column label="操作" width="210" align="center" class-name="small-padding fixed-width">
             <template #default="scope">
-              <el-button link type="primary" icon="Edit" @click="openModuleDialog(scope.row)">编辑</el-button>
+              <el-button v-hasPermi="['course:module:edit']" link type="primary" icon="Edit" @click="openModuleDialog(scope.row)">编辑</el-button>
               <el-button
+                v-hasPermi="['course:module:edit']"
                 link
                 type="primary"
                 icon="Switch"
@@ -101,6 +102,7 @@
                 @click="toggleModuleStatus(scope.row)"
               >{{ scope.row.status === 'active' ? '停用' : '启用' }}</el-button>
               <el-button
+                v-hasPermi="['course:module:remove']"
                 link
                 type="danger"
                 icon="Delete"
@@ -112,7 +114,7 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="资料管理" name="documents">
+      <el-tab-pane v-if="canViewDocuments" label="资料管理" name="documents">
         <div class="document-layout">
           <aside class="module-tree">
             <div class="tree-title">资料范围</div>
@@ -166,8 +168,8 @@
             </el-form>
 
             <div class="tab-toolbar compact">
-              <el-button type="primary" plain icon="Upload" @click="openUploadDialog('new')">上传资料</el-button>
-              <el-button icon="Download" @click="handleMockAction('批量下载')">批量下载</el-button>
+              <el-button v-hasPermi="['course:document:upload']" type="primary" plain icon="Upload" @click="openUploadDialog('new')">上传资料</el-button>
+              <el-button v-hasPermi="['course:document:download']" icon="Download" @click="handleMockAction('批量下载')">批量下载</el-button>
             </div>
 
             <el-table :data="filteredDocuments">
@@ -208,9 +210,10 @@
               <el-table-column label="更新时间" prop="updateTime" width="170" />
               <el-table-column label="操作" width="330" align="center" class-name="small-padding fixed-width">
                 <template #default="scope">
-                  <el-button link type="primary" icon="Upload" @click="openUploadDialog('version', scope.row)">新版本</el-button>
-                  <el-button link type="primary" icon="Clock" @click="openVersionDialog(scope.row)">版本历史</el-button>
+                  <el-button v-hasPermi="['course:document:upload']" link type="primary" icon="Upload" @click="openUploadDialog('version', scope.row)">新版本</el-button>
+                  <el-button v-hasPermi="['course:document:query']" link type="primary" icon="Clock" @click="openVersionDialog(scope.row)">版本历史</el-button>
                   <el-button
+                    v-hasPermi="['course:document:download']"
                     link
                     type="primary"
                     icon="Download"
@@ -218,6 +221,7 @@
                     @click="downloadLatestVersion(scope.row)"
                   >下载</el-button>
                   <el-button
+                    v-hasPermi="['course:document:parse']"
                     link
                     type="primary"
                     icon="Cpu"
@@ -226,6 +230,7 @@
                     @click="startParse(scope.row)"
                   >{{ scope.row.versionStatus === 'failed' ? '重新解析' : '解析' }}</el-button>
                   <el-button
+                    v-hasPermi="['course:document:remove']"
                     link
                     type="danger"
                     icon="Delete"
@@ -240,7 +245,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="知识库治理" name="knowledge">
+      <el-tab-pane v-if="canViewKnowledge" label="知识库治理" name="knowledge">
         <div v-loading="knowledgeLoading" class="knowledge-shell">
           <div class="knowledge-status">
             <div>
@@ -258,6 +263,7 @@
               </el-tag>
             </div>
             <el-button
+              v-hasPermi="['course:knowledge-base:edit']"
               type="primary"
               :loading="creatingDraft"
               :disabled="Boolean(activeKnowledgeVersion)"
@@ -269,18 +275,21 @@
               <template v-if="activeKnowledgeVersion">
                 <div class="tab-toolbar">
                   <el-button
+                    v-hasPermi="['course:knowledge-base:edit']"
                     type="primary"
                     :loading="savingSnapshot"
                     :disabled="activeKnowledgeVersion.status !== 'draft'"
                     @click="saveKnowledgeSnapshot"
                   >保存资料快照</el-button>
                   <el-button
+                    v-hasPermi="['course:knowledge-base:build']"
                     type="success"
                     :loading="buildingKnowledge"
                     :disabled="!['draft', 'failed'].includes(activeKnowledgeVersion.status || '') || !selectedSnapshotIds.length"
                     @click="buildKnowledge"
                   >{{ activeKnowledgeVersion.status === 'failed' ? '重新构建' : '开始构建' }}</el-button>
                   <el-button
+                    v-hasPermi="['course:knowledge-base:publish']"
                     type="primary"
                     :loading="publishingKnowledge"
                     :disabled="activeKnowledgeVersion.status !== 'ready'"
@@ -304,7 +313,7 @@
                   <el-table-column
                     type="selection"
                     width="48"
-                    :selectable="() => activeKnowledgeVersion?.status === 'draft'"
+                    :selectable="() => canEditKnowledge && activeKnowledgeVersion?.status === 'draft'"
                   />
                   <el-table-column label="资料" prop="documentTitle" min-width="220" />
                   <el-table-column label="文件名" prop="originalFilename" min-width="220" />
@@ -351,7 +360,7 @@
                 <el-table-column label="操作" width="100" align="center">
                   <template #default="scope">
                     <el-button
-                      v-if="['published', 'archived'].includes(scope.row.status)"
+                      v-if="canPublishKnowledge && ['published', 'archived'].includes(scope.row.status)"
                       link
                       type="primary"
                       :disabled="Boolean(activeKnowledgeVersion)"
@@ -365,10 +374,10 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="课程成员" name="members">
+      <el-tab-pane v-if="canViewMembers" label="课程成员" name="members">
         <div class="tab-toolbar">
-          <el-button type="primary" plain icon="Plus" @click="openMemberDialog()">添加成员</el-button>
-          <el-button icon="Connection" @click="openOwnerTransferDialog">转移负责人</el-button>
+          <el-button v-hasPermi="['course:member:edit']" type="primary" plain icon="Plus" @click="openMemberDialog()">添加成员</el-button>
+          <el-button v-hasPermi="['course:member:edit']" icon="Connection" @click="openOwnerTransferDialog">转移负责人</el-button>
         </div>
         <el-table v-loading="membersLoading" :data="courseMembers">
           <el-table-column label="用户名" prop="userName" width="140" />
@@ -391,7 +400,7 @@
           <el-table-column label="有效期至" prop="endAt" width="170" />
           <el-table-column label="操作" width="220" align="center" class-name="small-padding fixed-width">
             <template #default="scope">
-              <template v-if="scope.row.accessRole !== 'owner'">
+              <template v-if="canEditMembers && scope.row.accessRole !== 'owner'">
                 <el-button link type="primary" icon="Edit" @click="openMemberDialog(scope.row)">编辑</el-button>
                 <el-button link type="primary" icon="Switch" @click="toggleMemberStatus(scope.row)">
                   {{ scope.row.accessStatus === 'active' ? '停用' : '启用' }}
@@ -498,6 +507,7 @@
         <el-table-column label="操作" width="90" align="center">
           <template #default="scope">
             <el-button
+              v-hasPermi="['course:document:download']"
               link
               type="primary"
               icon="Download"
@@ -578,6 +588,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Collection, Document, Folder, UploadFilled } from '@element-plus/icons-vue'
 import { saveAs } from 'file-saver'
 import { listUser } from '@/api/system/user'
+import auth from '@/plugins/auth'
 import {
   addCourseMember,
   addCourseModule,
@@ -638,6 +649,13 @@ interface LocalUploadFile {
 }
 
 const courseId = computed(() => Number(route.params.courseId || 1001))
+const canViewModules = auth.hasPermi('course:module:list')
+const canViewDocuments = auth.hasPermi('course:document:list')
+const canViewKnowledge = auth.hasPermi('course:knowledge-base:query')
+const canEditKnowledge = auth.hasPermi('course:knowledge-base:edit')
+const canPublishKnowledge = auth.hasPermi('course:knowledge-base:publish')
+const canViewMembers = auth.hasPermi('course:member:list')
+const canEditMembers = auth.hasPermi('course:member:edit')
 const course = ref<Course>()
 const activeTab = ref('basic')
 const selectedModuleKey = ref('all')
@@ -798,22 +816,30 @@ function loadDetail() {
   getCourse(courseId.value).then(response => {
     course.value = response.data
   })
-  listCourseModule(courseId.value).then(response => {
-    courseModules.value = response.data || []
-  })
-  listCourseDocument(courseId.value).then(response => {
-    courseDocuments.value = response.data || []
-    courseDocuments.value.forEach((item: CourseDocument) => {
-      if (item.versionStatus === 'parsing' && item.id && item.latestVersionId) {
-        if (!parsingVersionIds.value.includes(item.latestVersionId)) {
-          parsingVersionIds.value.push(item.latestVersionId)
-        }
-        pollParseTask(item.id, item.latestVersionId)
-      }
+  if (canViewModules) {
+    listCourseModule(courseId.value).then(response => {
+      courseModules.value = response.data || []
     })
-  })
-  loadKnowledge()
-  loadMembers()
+  }
+  if (canViewDocuments) {
+    listCourseDocument(courseId.value).then(response => {
+      courseDocuments.value = response.data || []
+      courseDocuments.value.forEach((item: CourseDocument) => {
+        if (item.versionStatus === 'parsing' && item.id && item.latestVersionId) {
+          if (!parsingVersionIds.value.includes(item.latestVersionId)) {
+            parsingVersionIds.value.push(item.latestVersionId)
+          }
+          pollParseTask(item.id, item.latestVersionId)
+        }
+      })
+    })
+  }
+  if (canViewKnowledge) {
+    loadKnowledge()
+  }
+  if (canViewMembers) {
+    loadMembers()
+  }
 }
 
 function resetDocumentQuery() {

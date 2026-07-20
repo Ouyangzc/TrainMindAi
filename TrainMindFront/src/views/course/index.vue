@@ -34,13 +34,13 @@
 
     <el-row :gutter="10" class="mb8">
       <el-col :span="1.5">
-        <el-button type="primary" plain icon="Plus" @click="handleMockAction('新增课程')">新增</el-button>
+        <el-button v-hasPermi="['course:course:add']" type="primary" plain icon="Plus" @click="handleMockAction('新增课程')">新增</el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button type="success" plain icon="Edit" :disabled="single" @click="handleMockAction('修改课程')">修改</el-button>
+        <el-button v-hasPermi="['course:course:edit']" type="success" plain icon="Edit" :disabled="single" @click="handleMockAction('修改课程')">修改</el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button type="danger" plain icon="Delete" :disabled="multiple" @click="handleMockAction('删除课程')">删除</el-button>
+        <el-button v-hasPermi="['course:course:remove']" type="danger" plain icon="Delete" :disabled="multiple" @click="handleMockAction('删除课程')">删除</el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="handleQuery" />
     </el-row>
@@ -69,7 +69,8 @@
       <el-table-column label="课程编码" prop="courseCode" width="130" />
       <el-table-column label="课程名称" min-width="230" :show-overflow-tooltip="true">
         <template #default="scope">
-          <el-button link type="primary" @click="goDetail(scope.row)">{{ scope.row.courseName }}</el-button>
+          <el-button v-if="canQueryCourse" link type="primary" @click="goDetail(scope.row)">{{ scope.row.courseName }}</el-button>
+          <span v-else>{{ scope.row.courseName }}</span>
         </template>
       </el-table-column>
       <el-table-column label="分类" prop="courseCategory" width="140" />
@@ -99,9 +100,9 @@
       <el-table-column label="更新时间" prop="updateTime" width="170" />
       <el-table-column label="操作" width="240" align="center" class-name="small-padding fixed-width">
         <template #default="scope">
-          <el-button link type="primary" icon="View" @click="goDetail(scope.row)">详情</el-button>
-          <el-button link type="primary" icon="Edit" @click="handleMockAction('编辑课程')">编辑</el-button>
-          <el-button link type="primary" icon="Switch" @click="handleMockAction('启停课程')">启停</el-button>
+          <el-button v-hasPermi="['course:course:query']" link type="primary" icon="View" @click="goDetail(scope.row)">详情</el-button>
+          <el-button v-hasPermi="['course:course:edit']" link type="primary" icon="Edit" @click="handleMockAction('编辑课程')">编辑</el-button>
+          <el-button v-hasPermi="['course:course:edit']" link type="primary" icon="Switch" @click="handleMockAction('启停课程')">启停</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -119,6 +120,7 @@
 <script setup lang="ts" name="Course">
 import { useRouter } from 'vue-router'
 import { listCourse } from '@/api/course'
+import auth from '@/plugins/auth'
 import type { Course, CourseQueryParams } from '@/types'
 import {
   courseStatusOptions,
@@ -136,6 +138,7 @@ const single = ref(true)
 const multiple = ref(true)
 const total = ref(0)
 const courseList = ref<Course[]>([])
+const canQueryCourse = auth.hasPermi('course:course:query')
 
 const queryParams = reactive<CourseQueryParams>({
   pageNum: 1,
