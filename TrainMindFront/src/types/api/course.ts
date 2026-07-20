@@ -4,6 +4,9 @@ export type CourseStatus = 'draft' | 'active' | 'disabled' | 'archived'
 export type ModuleStatus = 'active' | 'disabled'
 export type DocumentStatus = 'active' | 'archived'
 export type VersionStatus = 'uploaded' | 'parsing' | 'parsed' | 'failed' | 'archived'
+export type KnowledgeBaseVersionStatus = 'draft' | 'building' | 'ready' | 'published' | 'archived' | 'failed'
+export type CourseAccessRole = 'owner' | 'teacher' | 'student'
+export type CourseAccessStatus = 'active' | 'disabled'
 
 export interface CourseQueryParams extends PageDomain {
   courseCode?: string
@@ -84,8 +87,85 @@ export interface CourseDocumentVersion extends BaseEntity {
   parseErrorMessage?: string
 }
 
+export interface DocumentParseTask extends BaseEntity {
+  id?: number
+  documentId?: number
+  documentVersionId?: number
+  status?: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  currentStep?: string
+  progress?: number
+  errorCode?: string
+  errorMessage?: string
+  retryCount?: number
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface KnowledgeBase extends BaseEntity {
+  id?: number
+  tenantId?: number
+  courseId?: number
+  name?: string
+  description?: string
+  currentVersionId?: number
+  status?: string
+}
+
+export interface KnowledgeBaseVersion extends BaseEntity {
+  id?: number
+  knowledgeBaseId?: number
+  versionNo?: number
+  status?: KnowledgeBaseVersionStatus
+  chunkCount?: number
+  buildTaskId?: number
+  buildErrorMessage?: string
+  publishedAt?: string
+  publishedBy?: string
+}
+
+export interface KnowledgeBaseVersionDocument extends BaseEntity {
+  id?: number
+  knowledgeBaseVersionId?: number
+  documentId?: number
+  documentVersionId?: number
+  documentTitle?: string
+  versionNo?: number
+  originalFilename?: string
+  fileExt?: string
+  versionStatus?: VersionStatus
+  moduleId?: number | null
+}
+
+export interface KnowledgeBaseBuildTask extends BaseEntity {
+  id?: number
+  status?: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  currentStep?: string
+  progress?: number
+  errorMessage?: string
+}
+
+export interface CourseMember extends BaseEntity {
+  id?: number
+  courseId?: number
+  userId?: number
+  userName?: string
+  nickName?: string
+  accessRole?: CourseAccessRole
+  accessStatus?: CourseAccessStatus
+  startAt?: string
+  endAt?: string
+}
+
 export type CourseListResult = TableDataInfo<Course[]>
 export type CourseResult = AjaxResult<Course>
 export type CourseModuleListResult = AjaxResult<CourseModule[]>
 export type CourseDocumentListResult = AjaxResult<CourseDocument[]>
 export type CourseDocumentVersionListResult = AjaxResult<CourseDocumentVersion[]>
+export type DocumentParseTaskResult = AjaxResult<DocumentParseTask>
+export type KnowledgeBaseResult = AjaxResult<KnowledgeBase>
+export type KnowledgeBaseVersionResult = AjaxResult<KnowledgeBaseVersion>
+export type KnowledgeBaseVersionListResult = AjaxResult<KnowledgeBaseVersion[]>
+export type KnowledgeBaseSnapshotResult = AjaxResult<KnowledgeBaseVersionDocument[]>
+export type KnowledgeBaseBuildTaskResult = AjaxResult<KnowledgeBaseBuildTask>
+export type CourseMemberListResult = AjaxResult<CourseMember[]>
+export type CourseMemberResult = AjaxResult<CourseMember>

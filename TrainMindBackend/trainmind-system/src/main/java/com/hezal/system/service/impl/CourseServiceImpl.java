@@ -4,11 +4,16 @@ import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.hezal.common.constant.TrainMindConstants;
 import com.hezal.common.exception.ServiceException;
 import com.hezal.system.domain.Course;
+import com.hezal.system.domain.KnowledgeBase;
+import com.hezal.system.domain.CourseUser;
 import com.hezal.system.mapper.CourseMapper;
+import com.hezal.system.mapper.CourseUserMapper;
+import com.hezal.system.mapper.KnowledgeBaseMapper;
 import com.hezal.system.service.ICourseService;
 
 /**
@@ -20,10 +25,15 @@ import com.hezal.system.service.ICourseService;
 public class CourseServiceImpl implements ICourseService
 {
     private final CourseMapper courseMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
+    private final CourseUserMapper courseUserMapper;
 
-    public CourseServiceImpl(CourseMapper courseMapper)
+    public CourseServiceImpl(CourseMapper courseMapper, KnowledgeBaseMapper knowledgeBaseMapper,
+            CourseUserMapper courseUserMapper)
     {
         this.courseMapper = courseMapper;
+        this.knowledgeBaseMapper = knowledgeBaseMapper;
+        this.courseUserMapper = courseUserMapper;
     }
 
     @Override
@@ -40,6 +50,7 @@ public class CourseServiceImpl implements ICourseService
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public int insertCourse(Course course)
     {
         applyDefaultTenant(course);
@@ -51,7 +62,24 @@ public class CourseServiceImpl implements ICourseService
         {
             course.setSortOrder(0);
         }
-        return courseMapper.insertCourse(course);
+        int rows = courseMapper.insertCourse(course);
+        KnowledgeBase knowledgeBase = new KnowledgeBase();
+        knowledgeBase.setTenantId(course.getTenantId());
+        knowledgeBase.setCourseId(course.getId());
+        knowledgeBase.setName(course.getCourseName() + "知识库");
+        knowledgeBase.setDescription(course.getDescription());
+        knowledgeBase.setStatus(TrainMindConstants.KNOWLEDGE_BASE_STATUS_ACTIVE);
+        knowledgeBase.setCreateBy(course.getCreateBy());
+        knowledgeBaseMapper.insertKnowledgeBase(knowledgeBase);
+        CourseUser owner = new CourseUser();
+        owner.setTenantId(course.getTenantId());
+        owner.setCourseId(course.getId());
+        owner.setUserId(course.getOwnerUserId());
+        owner.setAccessRole(TrainMindConstants.COURSE_ACCESS_ROLE_OWNER);
+        owner.setAccessStatus(TrainMindConstants.COURSE_ACCESS_STATUS_ACTIVE);
+        owner.setCreateBy(course.getCreateBy());
+        courseUserMapper.insertCourseUser(owner);
+        return rows;
     }
 
     @Override

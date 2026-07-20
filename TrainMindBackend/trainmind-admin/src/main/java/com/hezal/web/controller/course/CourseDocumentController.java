@@ -25,6 +25,7 @@ import com.hezal.common.utils.file.FileUtils;
 import com.hezal.system.domain.CourseDocument;
 import com.hezal.system.domain.CourseDocumentVersion;
 import com.hezal.system.service.ICourseDocumentService;
+import com.hezal.system.service.CourseAccessService;
 
 /**
  * 课程资料管理。
@@ -36,16 +37,20 @@ import com.hezal.system.service.ICourseDocumentService;
 public class CourseDocumentController extends BaseController
 {
     private final ICourseDocumentService documentService;
+    private final CourseAccessService courseAccessService;
 
-    public CourseDocumentController(ICourseDocumentService documentService)
+    public CourseDocumentController(ICourseDocumentService documentService,
+            CourseAccessService courseAccessService)
     {
         this.documentService = documentService;
+        this.courseAccessService = courseAccessService;
     }
 
     @PreAuthorize("@ss.hasPermi('course:document:list')")
     @GetMapping
     public AjaxResult list(@PathVariable Long courseId, CourseDocument document)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         document.setCourseId(courseId);
         List<CourseDocument> list = documentService.selectCourseDocumentList(document);
         return success(list);
@@ -60,6 +65,7 @@ public class CourseDocumentController extends BaseController
             @RequestParam(required = false) String remark,
             @RequestParam MultipartFile file)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return success(documentService.uploadDocument(courseId, moduleId, title, remark, file, getUsername()));
     }
 
@@ -69,6 +75,7 @@ public class CourseDocumentController extends BaseController
     public AjaxResult uploadVersion(@PathVariable Long courseId, @PathVariable Long documentId,
             @RequestParam(required = false) String remark, @RequestParam MultipartFile file)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return success(documentService.uploadVersion(courseId, documentId, remark, file, getUsername()));
     }
 
@@ -76,6 +83,7 @@ public class CourseDocumentController extends BaseController
     @GetMapping("/{documentId}/versions")
     public AjaxResult versions(@PathVariable Long courseId, @PathVariable Long documentId)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return success(documentService.selectVersions(courseId, documentId));
     }
 
@@ -84,6 +92,7 @@ public class CourseDocumentController extends BaseController
     public void download(@PathVariable Long courseId, @PathVariable Long documentId,
             @PathVariable Long versionId, HttpServletResponse response) throws Exception
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         CourseDocumentVersion version = documentService.selectVersion(courseId, documentId, versionId);
         response.setContentType(StringUtils.defaultIfEmpty(version.getContentType(), "application/octet-stream"));
         response.setContentLengthLong(version.getFileSize());
@@ -100,6 +109,7 @@ public class CourseDocumentController extends BaseController
     public AjaxResult parse(@PathVariable Long courseId, @PathVariable Long documentId,
             @PathVariable Long versionId)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return success(documentService.triggerParse(courseId, documentId, versionId, getUsername()));
     }
 
@@ -108,6 +118,7 @@ public class CourseDocumentController extends BaseController
     public AjaxResult parseTask(@PathVariable Long courseId, @PathVariable Long documentId,
             @PathVariable Long versionId)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return success(documentService.selectParseTask(
                 courseId, documentId, versionId, getUsername()));
     }
@@ -117,6 +128,7 @@ public class CourseDocumentController extends BaseController
     @DeleteMapping("/{documentId}")
     public AjaxResult remove(@PathVariable Long courseId, @PathVariable Long documentId)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return toAjax(documentService.deleteCourseDocument(courseId, documentId));
     }
 }

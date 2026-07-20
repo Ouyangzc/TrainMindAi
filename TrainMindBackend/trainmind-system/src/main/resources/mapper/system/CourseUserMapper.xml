@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hezal.system.mapper.CourseUserMapper">
+    <resultMap id="CourseUserResult" type="CourseUser">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="courseId" column="course_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="accessRole" column="access_role"/>
+        <result property="accessStatus" column="access_status"/>
+        <result property="startAt" column="start_at"/>
+        <result property="endAt" column="end_at"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+        <result property="userName" column="user_name"/>
+        <result property="nickName" column="nick_name"/>
+    </resultMap>
+    <sql id="selectCourseUserVo">
+        select cu.*, u.user_name, u.nick_name
+        from course_user cu
+        left join sys_user u on u.user_id = cu.user_id
+    </sql>
+    <select id="selectByCourseId" parameterType="Long" resultMap="CourseUserResult">
+        <include refid="selectCourseUserVo"/>
+        where cu.course_id = #{courseId} and cu.del_flag = '0'
+        order by case cu.access_role when 'owner' then 1 when 'teacher' then 2 else 3 end,
+                 cu.id
+    </select>
+    <select id="selectById" resultMap="CourseUserResult">
+        <include refid="selectCourseUserVo"/>
+        where cu.course_id = #{courseId} and cu.id = #{id} and cu.del_flag = '0'
+    </select>
+    <select id="selectByUserId" resultMap="CourseUserResult">
+        <include refid="selectCourseUserVo"/>
+        where cu.course_id = #{courseId} and cu.user_id = #{userId} and cu.del_flag = '0'
+    </select>
+    <select id="selectEffectiveAccess" resultMap="CourseUserResult">
+        <include refid="selectCourseUserVo"/>
+        where cu.course_id = #{courseId} and cu.user_id = #{userId}
+          and cu.del_flag = '0' and cu.access_status = 'active'
+          and (cu.start_at is null or cu.start_at &lt;= now())
+          and (cu.end_at is null or cu.end_at &gt; now())
+    </select>
+    <insert id="insertCourseUser" parameterType="CourseUser"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into course_user(
+          tenant_id, course_id, user_id, access_role, access_status,
+          start_at, end_at, del_flag, create_by, create_time, remark
+        ) values (
+          #{tenantId}, #{courseId}, #{userId}, #{accessRole}, #{accessStatus},
+          #{startAt}, #{endAt}, '0', #{createBy}, now(), #{remark}
+        )
+    </insert>
+    <update id="updateCourseUser" parameterType="CourseUser">
+        update course_user
+        <set>
+          <if test="accessRole != null and accessRole != ''">access_role = #{accessRole},</if>
+          <if test="accessStatus != null and accessStatus != ''">access_status = #{accessStatus},</if>
+          <if test="startAt != null">start_at = #{startAt},</if>
+          end_at = #{endAt},
+          <if test="remark != null">remark = #{remark},</if>
+          update_by = #{updateBy}, update_time = now()
+        </set>
+        where id = #{id} and del_flag = '0'
+    </update>
+    <update id="deleteCourseUser">
+        update course_user set del_flag = '2', update_by = #{username}, update_time = now()
+        where id = #{id} and del_flag = '0'
+    </update>
+</mapper>

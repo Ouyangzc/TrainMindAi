@@ -20,6 +20,7 @@ import com.hezal.common.core.domain.AjaxResult;
 import com.hezal.common.enums.BusinessType;
 import com.hezal.system.domain.CourseModule;
 import com.hezal.system.service.ICourseModuleService;
+import com.hezal.system.service.CourseAccessService;
 
 /**
  * 课程模块管理。
@@ -32,6 +33,8 @@ public class CourseModuleController extends BaseController
 {
     @Autowired
     private ICourseModuleService courseModuleService;
+    @Autowired
+    private CourseAccessService courseAccessService;
 
     /**
      * 查询课程模块列表。
@@ -40,6 +43,7 @@ public class CourseModuleController extends BaseController
     @GetMapping
     public AjaxResult list(@PathVariable Long courseId, CourseModule module)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         module.setCourseId(courseId);
         List<CourseModule> list = courseModuleService.selectCourseModuleList(module);
         return success(list);
@@ -50,8 +54,9 @@ public class CourseModuleController extends BaseController
      */
     @PreAuthorize("@ss.hasPermi('course:module:query')")
     @GetMapping("/{moduleId}")
-    public AjaxResult getInfo(@PathVariable Long moduleId)
+    public AjaxResult getInfo(@PathVariable Long courseId, @PathVariable Long moduleId)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return success(courseModuleService.selectCourseModuleById(moduleId));
     }
 
@@ -63,6 +68,7 @@ public class CourseModuleController extends BaseController
     @PostMapping
     public AjaxResult add(@PathVariable Long courseId, @Validated @RequestBody CourseModule module)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         module.setCourseId(courseId);
         module.setCreateBy(getUsername());
         return toAjax(courseModuleService.insertCourseModule(module));
@@ -77,6 +83,7 @@ public class CourseModuleController extends BaseController
     public AjaxResult edit(@PathVariable Long courseId, @PathVariable Long moduleId,
             @Validated @RequestBody CourseModule module)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         module.setId(moduleId);
         module.setCourseId(courseId);
         module.setUpdateBy(getUsername());
@@ -89,8 +96,9 @@ public class CourseModuleController extends BaseController
     @PreAuthorize("@ss.hasPermi('course:module:remove')")
     @Log(title = "课程模块", businessType = BusinessType.DELETE)
     @DeleteMapping("/{moduleId}")
-    public AjaxResult remove(@PathVariable Long moduleId)
+    public AjaxResult remove(@PathVariable Long courseId, @PathVariable Long moduleId)
     {
+        courseAccessService.requireManageAccess(courseId, getUserId());
         return toAjax(courseModuleService.deleteCourseModuleById(moduleId));
     }
 }

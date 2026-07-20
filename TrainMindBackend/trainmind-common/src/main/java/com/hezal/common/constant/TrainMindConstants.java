@@ -55,6 +55,22 @@ public class TrainMindConstants
     /** 解析任务状态：已取消 */
     public static final String PARSE_TASK_STATUS_CANCELLED = "cancelled";
 
+    public static final String KNOWLEDGE_BASE_STATUS_ACTIVE = "active";
+    public static final String KNOWLEDGE_BASE_STATUS_ARCHIVED = "archived";
+
+    public static final String KNOWLEDGE_BASE_VERSION_STATUS_DRAFT = "draft";
+    public static final String KNOWLEDGE_BASE_VERSION_STATUS_BUILDING = "building";
+    public static final String KNOWLEDGE_BASE_VERSION_STATUS_READY = "ready";
+    public static final String KNOWLEDGE_BASE_VERSION_STATUS_PUBLISHED = "published";
+    public static final String KNOWLEDGE_BASE_VERSION_STATUS_FAILED = "failed";
+    public static final String KNOWLEDGE_BASE_VERSION_STATUS_ARCHIVED = "archived";
+
+    public static final String COURSE_ACCESS_ROLE_OWNER = "owner";
+    public static final String COURSE_ACCESS_ROLE_TEACHER = "teacher";
+    public static final String COURSE_ACCESS_ROLE_STUDENT = "student";
+    public static final String COURSE_ACCESS_STATUS_ACTIVE = "active";
+    public static final String COURSE_ACCESS_STATUS_DISABLED = "disabled";
+
     private TrainMindConstants()
     {
     }

@@ -214,7 +214,50 @@ async def build_knowledge_base_version_task(
     task_id: int, task_type: str, payload: dict, session: AsyncSession
 ) -> None:
     """Run the MVP build chain for one knowledge_base_version."""
-    await build_chunk_task(task_id, "build_chunk", payload, session)
+    task_repo = KbBuildTaskRepo(session)
+    task = await task_repo.get(task_id)
+    if task is None:
+        raise ValueError(f"task not found: {task_id}")
+
+    result = await session.execute(
+        text(
+            "SELECT d.course_id, s.document_id, s.document_version_id "
+            "FROM public.knowledge_base_version_document s "
+            "JOIN public.course_document d ON d.id = s.document_id "
+            "JOIN public.course_document_version v ON v.id = s.document_version_id "
+            "WHERE s.knowledge_base_version_id = :version_id "
+            "AND s.del_flag = '0' AND d.del_flag = '0' "
+            "AND v.del_flag = '0' AND v.status = 'parsed' "
+            "ORDER BY s.id"
+        ),
+        {"version_id": task.knowledge_base_version_id},
+    )
+    documents = result.mappings().all()
+    if not documents:
+        raise ValueError("knowledge base snapshot is empty")
+
+    chunk_repo = KnowledgeChunkRepo(session)
+    await chunk_repo.delete_by_version(task.knowledge_base_version_id)
+    all_chunks = []
+    for index, document in enumerate(documents, start=1):
+        pages = await DocumentPageRepo(session).list_by_version(document["document_version_id"])
+        if not pages:
+            raise ValueError(
+                f"document pages not found: {document['document_version_id']}"
+            )
+        chunks = await process_title_chunk(
+            session,
+            knowledge_base_version_id=task.knowledge_base_version_id,
+            course_id=document["course_id"],
+            document_id=document["document_id"],
+            document_version_id=document["document_version_id"],
+            pages=pages,
+        )
+        all_chunks.extend(chunks)
+        await task_repo.update_progress(
+            task, "chunking_documents", int(index / len(documents) * 60)
+        )
+    await chunk_repo.add_all(all_chunks)
     await build_keyword_index_task(task_id, "build_keyword_index", payload, session)
     await build_embedding_index_task(task_id, "build_embedding_index", payload, session)
 

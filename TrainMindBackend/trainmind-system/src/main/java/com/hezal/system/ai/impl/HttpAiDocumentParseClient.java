@@ -14,9 +14,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hezal.common.exception.ServiceException;
 import com.hezal.system.ai.AiDocumentParseClient;
+import com.hezal.system.ai.AiKnowledgeBaseClient;
 import com.hezal.system.ai.config.AiServiceProperties;
 import com.hezal.system.domain.CourseDocumentVersion;
 import com.hezal.system.domain.DocumentParseTask;
+import com.hezal.system.domain.KnowledgeBaseBuildTask;
 
 /**
  * 基于HTTP的AI文档解析客户端。
@@ -24,7 +26,7 @@ import com.hezal.system.domain.DocumentParseTask;
  * @author trainmind
  */
 @Component
-public class HttpAiDocumentParseClient implements AiDocumentParseClient
+public class HttpAiDocumentParseClient implements AiDocumentParseClient, AiKnowledgeBaseClient
 {
     private final AiServiceProperties properties;
 
@@ -80,6 +82,34 @@ public class HttpAiDocumentParseClient implements AiDocumentParseClient
         return task;
     }
 
+    @Override
+    public KnowledgeBaseBuildTask createBuildTask(Long knowledgeBaseVersionId)
+    {
+        JsonNode body = send("POST",
+                "/internal/v1/kb-versions/" + knowledgeBaseVersionId + "/build", null);
+        KnowledgeBaseBuildTask task = new KnowledgeBaseBuildTask();
+        task.setId(requiredLong(body, "task_id"));
+        task.setStatus(requiredText(body, "status"));
+        task.setTaskType("build_knowledge_base_version");
+        return task;
+    }
+
+    @Override
+    public KnowledgeBaseBuildTask getBuildTask(Long taskId)
+    {
+        JsonNode body = send("GET", "/internal/v1/kb-tasks/" + taskId, null);
+        KnowledgeBaseBuildTask task = new KnowledgeBaseBuildTask();
+        task.setId(requiredLong(body, "task_id"));
+        task.setTaskType(text(body, "task_type"));
+        task.setStatus(requiredText(body, "status"));
+        task.setCurrentStep(text(body, "current_step"));
+        task.setProgress(body.path("progress").isNumber() ? body.path("progress").asInt() : 0);
+        task.setErrorCode(text(body, "error_code"));
+        task.setErrorMessage(text(body, "error_message"));
+        task.setRetryCount(body.path("retry_count").isNumber() ? body.path("retry_count").asInt() : 0);
+        return task;
+    }
+
     private JsonNode send(String method, String path, Object requestBody)
     {
         try
@@ -91,7 +121,8 @@ public class HttpAiDocumentParseClient implements AiDocumentParseClient
                     .header("Accept", "application/json");
             if ("POST".equals(method))
             {
-                String json = objectMapper.writeValueAsString(requestBody);
+                String json = objectMapper.writeValueAsString(
+                        requestBody == null ? Map.of() : requestBody);
                 builder.header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(json));
             }

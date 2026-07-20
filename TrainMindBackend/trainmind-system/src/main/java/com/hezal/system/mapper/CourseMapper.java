@@ -16,6 +16,7 @@ public interface CourseMapper
     List<Course> selectCourseList(Course course);
 
     Course selectCourseById(Long id);
+    Course lockCourseById(Long id);
 
     Course selectCourseByCode(@Param("tenantId") Long tenantId, @Param("courseCode") String courseCode);
 

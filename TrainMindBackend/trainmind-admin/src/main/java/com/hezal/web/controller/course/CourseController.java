@@ -72,6 +72,10 @@ public class CourseController extends BaseController
             return error("新增课程'" + course.getCourseName() + "'失败，课程编码已存在");
         }
         course.setCreateBy(getUsername());
+        if (course.getOwnerUserId() == null)
+        {
+            course.setOwnerUserId(getUserId());
+        }
         return toAjax(courseService.insertCourse(course));
     }
 

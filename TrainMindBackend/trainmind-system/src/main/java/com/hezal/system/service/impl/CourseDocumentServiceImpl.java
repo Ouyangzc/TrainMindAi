@@ -26,6 +26,7 @@ import com.hezal.system.domain.DocumentParseTask;
 import com.hezal.system.ai.AiDocumentParseClient;
 import com.hezal.system.mapper.CourseDocumentMapper;
 import com.hezal.system.mapper.CourseDocumentVersionMapper;
+import com.hezal.system.mapper.KnowledgeBaseMapper;
 import com.hezal.system.mapper.CourseModuleMapper;
 import com.hezal.system.service.ICourseDocumentService;
 import com.hezal.system.storage.CourseDocumentObjectNameGenerator;
@@ -48,6 +49,7 @@ public class CourseDocumentServiceImpl implements ICourseDocumentService
     private final CourseDocumentMapper documentMapper;
 
     private final CourseDocumentVersionMapper versionMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
 
     private final CourseModuleMapper moduleMapper;
 
@@ -58,13 +60,15 @@ public class CourseDocumentServiceImpl implements ICourseDocumentService
     private final AiDocumentParseClient aiDocumentParseClient;
 
     public CourseDocumentServiceImpl(CourseDocumentMapper documentMapper,
-            CourseDocumentVersionMapper versionMapper, CourseModuleMapper moduleMapper,
+            CourseDocumentVersionMapper versionMapper, KnowledgeBaseMapper knowledgeBaseMapper,
+            CourseModuleMapper moduleMapper,
             ObjectStorageService objectStorageService,
             CourseDocumentObjectNameGenerator objectNameGenerator,
             AiDocumentParseClient aiDocumentParseClient)
     {
         this.documentMapper = documentMapper;
         this.versionMapper = versionMapper;
+        this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.moduleMapper = moduleMapper;
         this.objectStorageService = objectStorageService;
         this.objectNameGenerator = objectNameGenerator;
@@ -214,6 +218,10 @@ public class CourseDocumentServiceImpl implements ICourseDocumentService
     public int deleteCourseDocument(Long courseId, Long documentId)
     {
         validateDocumentCourse(documentMapper.lockCourseDocumentById(documentId), courseId);
+        if (knowledgeBaseMapper.countDocumentReferences(documentId) > 0)
+        {
+            throw new ServiceException("资料已被知识库版本引用，不能删除");
+        }
         versionMapper.deleteVersionsByDocumentId(documentId);
         return documentMapper.deleteCourseDocumentById(documentId);
     }

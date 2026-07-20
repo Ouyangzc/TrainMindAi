@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hezal.system.mapper.KnowledgeBaseMapper">
+    <resultMap id="KnowledgeBaseResult" type="KnowledgeBase">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="courseId" column="course_id"/>
+        <result property="name" column="name"/>
+        <result property="description" column="description"/>
+        <result property="currentVersionId" column="current_version_id"/>
+        <result property="status" column="status"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+
+    <resultMap id="VersionResult" type="KnowledgeBaseVersion">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="knowledgeBaseId" column="knowledge_base_id"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="status" column="status"/>
+        <result property="chunkCount" column="chunk_count"/>
+        <result property="chunkStrategyVersion" column="chunk_strategy_version"/>
+        <result property="retrievalStrategyVersion" column="retrieval_strategy_version"/>
+        <result property="embeddingIndexVersionId" column="embedding_index_version_id"/>
+        <result property="keywordIndexVersionId" column="keyword_index_version_id"/>
+        <result property="buildTaskId" column="build_task_id"/>
+        <result property="buildErrorMessage" column="build_error_message"/>
+        <result property="publishedAt" column="published_at"/>
+        <result property="publishedBy" column="published_by"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+
+    <resultMap id="SnapshotResult" type="KnowledgeBaseVersionDocument">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="knowledgeBaseVersionId" column="knowledge_base_version_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="documentVersionId" column="document_version_id"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="documentTitle" column="document_title"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="originalFilename" column="original_filename"/>
+        <result property="fileExt" column="file_ext"/>
+        <result property="versionStatus" column="version_status"/>
+        <result property="moduleId" column="module_id"/>
+    </resultMap>
+
+    <select id="selectByCourseId" resultMap="KnowledgeBaseResult">
+        select * from knowledge_base
+        where tenant_id = #{tenantId} and course_id = #{courseId} and del_flag = '0'
+    </select>
+    <select id="lockById" parameterType="Long" resultMap="KnowledgeBaseResult">
+        select * from knowledge_base where id = #{id} and del_flag = '0' for update
+    </select>
+    <insert id="insertKnowledgeBase" parameterType="KnowledgeBase"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into knowledge_base(
+          tenant_id, course_id, name, description, status, del_flag, create_by, create_time, remark
+        ) values (
+          #{tenantId}, #{courseId}, #{name}, #{description}, #{status}, '0', #{createBy}, now(), #{remark}
+        )
+    </insert>
+    <select id="selectVersions" parameterType="Long" resultMap="VersionResult">
+        select * from knowledge_base_version
+        where knowledge_base_id = #{knowledgeBaseId} and del_flag = '0'
+        order by version_no desc
+    </select>
+    <select id="selectVersion" resultMap="VersionResult">
+        select * from knowledge_base_version
+        where knowledge_base_id = #{knowledgeBaseId} and id = #{versionId} and del_flag = '0'
+    </select>
+    <select id="lockVersion" resultMap="VersionResult">
+        select * from knowledge_base_version
+        where knowledge_base_id = #{knowledgeBaseId} and id = #{versionId} and del_flag = '0'
+        for update
+    </select>
+    <select id="selectActiveVersion" parameterType="Long" resultMap="VersionResult">
+        select * from knowledge_base_version
+        where knowledge_base_id = #{knowledgeBaseId} and del_flag = '0'
+          and status in ('draft', 'building', 'ready', 'failed')
+        limit 1
+    </select>
+    <select id="selectMaxVersionNo" parameterType="Long" resultType="Integer">
+        select coalesce(max(version_no), 0) from knowledge_base_version
+        where knowledge_base_id = #{knowledgeBaseId} and del_flag = '0'
+    </select>
+    <insert id="insertVersion" parameterType="KnowledgeBaseVersion"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into knowledge_base_version(
+          tenant_id, knowledge_base_id, version_no, status, chunk_count,
+          chunk_strategy_version, retrieval_strategy_version,
+          del_flag, create_by, create_time, remark
+        ) values (
+          #{tenantId}, #{knowledgeBaseId}, #{versionNo}, #{status}, #{chunkCount},
+          #{chunkStrategyVersion}, #{retrievalStrategyVersion},
+          '0', #{createBy}, now(), #{remark}
+        )
+    </insert>
+    <insert id="copySnapshot">
+        insert into knowledge_base_version_document(
+          tenant_id, knowledge_base_version_id, document_id, document_version_id,
+          del_flag, create_by, create_time, remark
+        )
+        select tenant_id, #{targetVersionId}, document_id, document_version_id,
+               '0', #{username}, now(), remark
+        from knowledge_base_version_document
+        where knowledge_base_version_id = #{sourceVersionId} and del_flag = '0'
+    </insert>
+    <select id="selectSnapshot" parameterType="Long" resultMap="SnapshotResult">
+        select s.*, d.title as document_title, v.version_no, v.original_filename,
+               v.file_ext, v.status as version_status, v.module_id
+        from knowledge_base_version_document s
+        join course_document d on d.id = s.document_id
+        join course_document_version v on v.id = s.document_version_id
+        where s.knowledge_base_version_id = #{versionId} and s.del_flag = '0'
+        order by d.module_id nulls first, d.id
+    </select>
+    <select id="selectParsedVersions" resultType="CourseDocumentVersion">
+        select id, tenant_id, course_id, module_id, document_id, version_no,
+               original_filename, file_ext, status
+        from course_document_version
+        where course_id = #{courseId} and del_flag = '0' and status = 'parsed'
+          and id in
+        <foreach collection="versionIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+    <update id="deleteSnapshot">
+        update knowledge_base_version_document
+        set del_flag = '2', update_by = #{username}, update_time = now()
+        where knowledge_base_version_id = #{versionId} and del_flag = '0'
+    </update>
+    <insert id="insertSnapshot" parameterType="KnowledgeBaseVersionDocument"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into knowledge_base_version_document(
+          tenant_id, knowledge_base_version_id, document_id, document_version_id,
+          del_flag, create_by, create_time, remark
+        ) values (
+          #{tenantId}, #{knowledgeBaseVersionId}, #{documentId}, #{documentVersionId},
+          '0', #{createBy}, now(), #{remark}
+        )
+    </insert>
+    <select id="countSnapshot" parameterType="Long" resultType="Integer">
+        select count(1) from knowledge_base_version_document
+        where knowledge_base_version_id = #{versionId} and del_flag = '0'
+    </select>
+    <update id="updateBuildState">
+        update knowledge_base_version
+        set status = #{status}, build_task_id = #{taskId},
+            build_error_message = #{errorMessage},
+            update_by = #{username}, update_time = now()
+        where id = #{versionId} and del_flag = '0'
+    </update>
+    <update id="markBuildReady">
+        update knowledge_base_version
+        set status = 'ready',
+            chunk_count = (
+              select count(1) from ai.knowledge_chunk
+              where knowledge_base_version_id = #{versionId} and status = 'active'
+            ),
+            embedding_index_version_id = (
+              select max(id) from ai.embedding_index_version
+              where knowledge_base_version_id = #{versionId} and status = 'ready'
+            ),
+            keyword_index_version_id = (
+              select max(id) from ai.keyword_index_version
+              where knowledge_base_version_id = #{versionId} and status = 'ready'
+            ),
+            build_error_message = null,
+            update_by = #{username}, update_time = now()
+        where id = #{versionId} and del_flag = '0'
+    </update>
+    <update id="archiveVersion">
+        update knowledge_base_version
+        set status = 'archived', update_by = #{username}, update_time = now()
+        where id = #{versionId} and del_flag = '0'
+    </update>
+    <update id="publishVersion">
+        update knowledge_base_version
+        set status = 'published', published_at = now(), published_by = #{username},
+            update_by = #{username}, update_time = now()
+        where id = #{versionId} and status = 'ready' and del_flag = '0'
+    </update>
+    <update id="updateCurrentVersion">
+        update knowledge_base
+        set current_version_id = #{versionId}, update_by = #{username}, update_time = now()
+        where id = #{knowledgeBaseId} and del_flag = '0'
+    </update>
+    <select id="selectPublishedDocuments" parameterType="Long" resultMap="SnapshotResult">
+        select s.*, d.title as document_title, v.version_no, v.original_filename,
+               v.file_ext, v.status as version_status, v.module_id
+        from knowledge_base kb
+        join knowledge_base_version kv
+          on kv.id = kb.current_version_id and kv.status = 'published' and kv.del_flag = '0'
+        join knowledge_base_version_document s
+          on s.knowledge_base_version_id = kv.id and s.del_flag = '0'
+        join course_document d on d.id = s.document_id
+        join course_document_version v on v.id = s.document_version_id
+        where kb.course_id = #{courseId} and kb.del_flag = '0'
+        order by v.module_id nulls first, d.id
+    </select>
+    <select id="countDocumentReferences" parameterType="Long" resultType="Integer">
+        select count(1)
+        from knowledge_base_version_document s
+        join knowledge_base_version v
+          on v.id = s.knowledge_base_version_id and v.del_flag = '0'
+        where s.document_id = #{documentId} and s.del_flag = '0'
+    </select>
+</mapper>
