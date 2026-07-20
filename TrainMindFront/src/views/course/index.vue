@@ -34,13 +34,13 @@
 
     <el-row :gutter="10" class="mb8">
       <el-col :span="1.5">
-        <el-button v-hasPermi="['course:course:add']" type="primary" plain icon="Plus" @click="handleMockAction('新增课程')">新增</el-button>
+        <el-button v-hasPermi="['course:course:add']" type="primary" plain icon="Plus" @click="openCourseDialog()">新增</el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button v-hasPermi="['course:course:edit']" type="success" plain icon="Edit" :disabled="single" @click="handleMockAction('修改课程')">修改</el-button>
+        <el-button v-hasPermi="['course:course:edit']" type="success" plain icon="Edit" :disabled="single" @click="editSelectedCourse">修改</el-button>
       </el-col>
       <el-col :span="1.5">
-        <el-button v-hasPermi="['course:course:remove']" type="danger" plain icon="Delete" :disabled="multiple" @click="handleMockAction('删除课程')">删除</el-button>
+        <el-button v-hasPermi="['course:course:remove']" type="danger" plain icon="Delete" :disabled="multiple" @click="removeCourses()">删除</el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="handleQuery" />
     </el-row>
@@ -101,8 +101,11 @@
       <el-table-column label="操作" width="240" align="center" class-name="small-padding fixed-width">
         <template #default="scope">
           <el-button v-hasPermi="['course:course:query']" link type="primary" icon="View" @click="goDetail(scope.row)">详情</el-button>
-          <el-button v-hasPermi="['course:course:edit']" link type="primary" icon="Edit" @click="handleMockAction('编辑课程')">编辑</el-button>
-          <el-button v-hasPermi="['course:course:edit']" link type="primary" icon="Switch" @click="handleMockAction('启停课程')">启停</el-button>
+          <el-button v-hasPermi="['course:course:edit']" link type="primary" icon="Edit" @click="openCourseDialog(scope.row)">编辑</el-button>
+          <el-button v-hasPermi="['course:course:edit']" link type="primary" icon="Switch" @click="toggleCourseStatus(scope.row)">
+            {{ scope.row.status === 'active' ? '停用' : '启用' }}
+          </el-button>
+          <el-button v-hasPermi="['course:course:remove']" link type="danger" icon="Delete" @click="removeCourses(scope.row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -114,12 +117,65 @@
       v-model:limit="queryParams.pageSize"
       @pagination="getList"
     />
+
+    <el-dialog :title="courseForm.id ? '修改课程' : '新增课程'" v-model="courseDialogOpen" width="620px" append-to-body @closed="resetCourseForm">
+      <el-form ref="courseFormRef" :model="courseForm" :rules="courseRules" label-width="96px">
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="课程编码" prop="courseCode">
+              <el-input v-model="courseForm.courseCode" maxlength="64" placeholder="请输入课程编码" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="课程名称" prop="courseName">
+              <el-input v-model="courseForm.courseName" maxlength="200" placeholder="请输入课程名称" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="课程分类" prop="courseCategory">
+              <el-input v-model="courseForm.courseCategory" maxlength="100" placeholder="请输入课程分类" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="开课日期" prop="startDate">
+              <el-date-picker v-model="courseForm.startDate" type="date" value-format="YYYY-MM-DD" placeholder="请选择日期" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="课程状态" prop="status">
+              <el-select v-model="courseForm.status" style="width: 100%">
+                <el-option v-for="item in courseStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="排序" prop="sortOrder">
+              <el-input-number v-model="courseForm.sortOrder" :min="0" :max="9999" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="课程简介" prop="description">
+          <el-input v-model="courseForm.description" type="textarea" :rows="3" maxlength="1000" show-word-limit />
+        </el-form-item>
+        <el-form-item label="备注" prop="remark">
+          <el-input v-model="courseForm.remark" type="textarea" :rows="2" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button type="primary" :loading="savingCourse" @click="submitCourse">确 定</el-button>
+        <el-button :disabled="savingCourse" @click="courseDialogOpen = false">取 消</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts" name="Course">
 import { useRouter } from 'vue-router'
-import { listCourse } from '@/api/course'
+import { addCourse, delCourse, getCourse, listCourse, updateCourse } from '@/api/course'
 import auth from '@/plugins/auth'
 import type { Course, CourseQueryParams } from '@/types'
 import {
@@ -139,6 +195,22 @@ const multiple = ref(true)
 const total = ref(0)
 const courseList = ref<Course[]>([])
 const canQueryCourse = auth.hasPermi('course:course:query')
+const courseDialogOpen = ref(false)
+const savingCourse = ref(false)
+const courseFormRef = ref()
+const courseForm = reactive<Course>({
+  courseCode: '',
+  courseName: '',
+  courseCategory: '',
+  description: '',
+  startDate: undefined,
+  status: 'active',
+  sortOrder: 0,
+  remark: ''
+})
+const courseRules = {
+  courseName: [{ required: true, message: '课程名称不能为空', trigger: 'blur' }]
+}
 
 const queryParams = reactive<CourseQueryParams>({
   pageNum: 1,
@@ -148,18 +220,23 @@ const queryParams = reactive<CourseQueryParams>({
   status: ''
 })
 
-const activeCourseCount = computed(() => courseList.value.filter(item => item.status === 'active').length)
-const documentTotal = computed(() => courseList.value.reduce((sum, item) => sum + (item.documentCount || 0), 0))
-const studentTotal = computed(() => courseList.value.reduce((sum, item) => sum + (item.studentCount || 0), 0))
+const activeCourseCount = computed(() => courseList.value.filter((item: Course) => item.status === 'active').length)
+const documentTotal = computed(() => courseList.value.reduce(
+  (sum: number, item: Course) => sum + (item.documentCount || 0), 0
+))
+const studentTotal = computed(() => courseList.value.reduce(
+  (sum: number, item: Course) => sum + (item.studentCount || 0), 0
+))
 
-function getList() {
+async function getList() {
   loading.value = true
-  listCourse(queryParams).then(response => {
+  try {
+    const response = await listCourse(queryParams)
     courseList.value = response.rows || []
     total.value = response.total || 0
-  }).finally(() => {
+  } finally {
     loading.value = false
-  })
+  }
 }
 
 function handleQuery() {
@@ -182,8 +259,85 @@ function goDetail(row: Course) {
   router.push(`/course/detail/${row.id}`)
 }
 
-function handleMockAction(name: string) {
-  proxy?.$modal.msg(`${name}：下一步接入具体表单操作`)
+function resetCourseForm() {
+  Object.assign(courseForm, {
+    id: undefined,
+    courseCode: '',
+    courseName: '',
+    courseCategory: '',
+    description: '',
+    startDate: undefined,
+    status: 'active',
+    sortOrder: 0,
+    remark: ''
+  })
+  courseFormRef.value?.clearValidate()
+}
+
+async function openCourseDialog(row?: Course) {
+  resetCourseForm()
+  if (row?.id) {
+    const response = await getCourse(row.id)
+    Object.assign(courseForm, response.data)
+  }
+  courseDialogOpen.value = true
+}
+
+function editSelectedCourse() {
+  const row = courseList.value.find((item: Course) => item.id === ids.value[0])
+  if (row) openCourseDialog(row)
+}
+
+async function submitCourse() {
+  const valid = await courseFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  savingCourse.value = true
+  const isEdit = Boolean(courseForm.id)
+  try {
+    const payload: Course = {
+      ...courseForm,
+      courseCode: courseForm.courseCode?.trim(),
+      courseName: courseForm.courseName?.trim(),
+      courseCategory: courseForm.courseCategory?.trim(),
+      description: courseForm.description?.trim(),
+      remark: courseForm.remark?.trim()
+    }
+    if (isEdit) {
+      await updateCourse(payload)
+    } else {
+      await addCourse(payload)
+    }
+    courseDialogOpen.value = false
+    await getList()
+    proxy?.$modal.msgSuccess(isEdit ? '课程修改成功' : '课程新增成功')
+  } finally {
+    savingCourse.value = false
+  }
+}
+
+async function removeCourses(row?: Course) {
+  const targetIds = row?.id ? [row.id] : ids.value
+  if (!targetIds.length) return
+  const names = row?.courseName || courseList.value
+    .filter((item: Course) => targetIds.includes(item.id!))
+    .map((item: Course) => item.courseName)
+    .join('、')
+  try {
+    await proxy?.$modal.confirm(`确认删除课程“${names}”吗？课程下存在模块或资料时将无法删除。`)
+  } catch {
+    return
+  }
+  await delCourse(targetIds)
+  await getList()
+  proxy?.$modal.msgSuccess('课程删除成功')
+}
+
+async function toggleCourseStatus(row: Course) {
+  if (!row.id) return
+  const status = row.status === 'active' ? 'disabled' : 'active'
+  await updateCourse({ ...row, status })
+  await getList()
+  proxy?.$modal.msgSuccess(status === 'active' ? '课程已启用' : '课程已停用')
 }
 
 getList()

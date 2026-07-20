@@ -18,7 +18,7 @@
         </div>
       </div>
       <div class="header-actions">
-        <el-button v-hasPermi="['course:course:edit']" icon="Edit" @click="handleMockAction('编辑课程')">编辑</el-button>
+        <el-button v-hasPermi="['course:course:edit']" icon="Edit" @click="openCourseEditDialog">编辑</el-button>
         <el-button v-if="canViewDocuments" v-hasPermi="['course:document:upload']" type="primary" icon="Upload" @click="activeTab = 'documents'">上传资料</el-button>
       </div>
     </div>
@@ -580,6 +580,59 @@
         <el-button @click="ownerTransferOpen = false">取 消</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog title="编辑课程" v-model="courseEditOpen" width="620px" append-to-body>
+      <el-form ref="courseEditFormRef" :model="courseEditForm" :rules="courseEditRules" label-width="96px">
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="课程编码" prop="courseCode">
+              <el-input v-model="courseEditForm.courseCode" maxlength="64" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="课程名称" prop="courseName">
+              <el-input v-model="courseEditForm.courseName" maxlength="200" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="课程分类">
+              <el-input v-model="courseEditForm.courseCategory" maxlength="100" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="开课日期">
+              <el-date-picker v-model="courseEditForm.startDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="课程状态">
+              <el-select v-model="courseEditForm.status" style="width: 100%">
+                <el-option v-for="item in courseStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="排序">
+              <el-input-number v-model="courseEditForm.sortOrder" :min="0" :max="9999" controls-position="right" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="课程简介">
+          <el-input v-model="courseEditForm.description" type="textarea" :rows="3" maxlength="1000" show-word-limit />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="courseEditForm.remark" type="textarea" :rows="2" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button type="primary" :loading="savingCourseEdit" @click="submitCourseEdit">确 定</el-button>
+        <el-button :disabled="savingCourseEdit" @click="courseEditOpen = false">取 消</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -616,6 +669,7 @@ import {
   uploadCourseDocument,
   uploadCourseDocumentVersion,
   updateCourseMember,
+  updateCourse,
   updateCourseModule
 } from '@/api/course'
 import type {
@@ -702,6 +756,9 @@ const userOptions = ref<SysUser[]>([])
 const ownerTransferOpen = ref(false)
 const ownerTargetUserId = ref<number>()
 const transferringOwner = ref(false)
+const courseEditOpen = ref(false)
+const savingCourseEdit = ref(false)
+const courseEditFormRef = ref()
 const versionRows = ref<Array<{
   id: number
   versionNo: string
@@ -737,6 +794,10 @@ const memberForm = reactive<CourseMember>({
   startAt: undefined,
   endAt: undefined
 })
+const courseEditForm = reactive<Course>({})
+const courseEditRules = {
+  courseName: [{ required: true, message: '课程名称不能为空', trigger: 'blur' }]
+}
 
 const normalModules = computed(() => courseModules.value)
 const parsedDocumentCount = computed(() => courseDocuments.value.filter((item: CourseDocument) => item.versionStatus === 'parsed').length)
@@ -1451,6 +1512,35 @@ async function submitOwnerTransfer() {
     proxy?.$modal.msgSuccess('课程负责人转移成功')
   } finally {
     transferringOwner.value = false
+  }
+}
+
+function openCourseEditDialog() {
+  if (!course.value) return
+  Object.assign(courseEditForm, course.value)
+  courseEditOpen.value = true
+  nextTick(() => courseEditFormRef.value?.clearValidate())
+}
+
+async function submitCourseEdit() {
+  const valid = await courseEditFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  savingCourseEdit.value = true
+  try {
+    await updateCourse({
+      ...courseEditForm,
+      courseCode: courseEditForm.courseCode?.trim(),
+      courseName: courseEditForm.courseName?.trim(),
+      courseCategory: courseEditForm.courseCategory?.trim(),
+      description: courseEditForm.description?.trim(),
+      remark: courseEditForm.remark?.trim()
+    })
+    const response = await getCourse(courseId.value)
+    course.value = response.data
+    courseEditOpen.value = false
+    proxy?.$modal.msgSuccess('课程修改成功')
+  } finally {
+    savingCourseEdit.value = false
   }
 }
 
