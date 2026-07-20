@@ -58,6 +58,18 @@
         <result property="moduleId" column="module_id"/>
     </resultMap>
 
+    <resultMap id="ParsedDocumentVersionResult" type="CourseDocumentVersion">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="courseId" column="course_id"/>
+        <result property="moduleId" column="module_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="originalFilename" column="original_filename"/>
+        <result property="fileExt" column="file_ext"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
     <select id="selectByCourseId" resultMap="KnowledgeBaseResult">
         select * from knowledge_base
         where tenant_id = #{tenantId} and course_id = #{courseId} and del_flag = '0'
@@ -128,7 +140,7 @@
         where s.knowledge_base_version_id = #{versionId} and s.del_flag = '0'
         order by d.module_id nulls first, d.id
     </select>
-    <select id="selectParsedVersions" resultType="CourseDocumentVersion">
+    <select id="selectParsedVersions" resultMap="ParsedDocumentVersionResult">
         select id, tenant_id, course_id, module_id, document_id, version_no,
                original_filename, file_ext, status
         from course_document_version
