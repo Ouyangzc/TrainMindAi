@@ -101,7 +101,8 @@ export function uploadCourseDocument(courseId: number, data: FormData): Promise<
   return request({
     url: `/course/${courseId}/documents/upload`,
     method: 'post',
-    data
+    data,
+    headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
 
@@ -113,7 +114,8 @@ export function uploadCourseDocumentVersion(
   return request({
     url: `/course/${courseId}/documents/${documentId}/versions`,
     method: 'post',
-    data
+    data,
+    headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
 
