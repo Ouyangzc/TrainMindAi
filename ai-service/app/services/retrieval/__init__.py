@@ -104,6 +104,8 @@ async def hybrid_retrieve(
     kb_version_id: int,
     course_id: int | None = None,
     top_k: int | None = None,
+    session_id: int | None = None,
+    message_id: int | None = None,
 ) -> tuple[str, list[dict], int | None]:
     """混合检索入口。
 
@@ -149,9 +151,12 @@ async def hybrid_retrieve(
         stmt = select(
             KnowledgeChunk.id,
             KnowledgeChunk.chunk_text,
+            KnowledgeChunk.document_id,
+            KnowledgeChunk.document_version_id,
             KnowledgeChunk.source_file,
             KnowledgeChunk.page_start,
             KnowledgeChunk.page_end,
+            KnowledgeChunk.metadata_json,
         ).where(KnowledgeChunk.id.in_([r["chunk_id"] for r in fused]))
         result = await session.execute(stmt)
         chunk_map = {row[0]: row for row in result.fetchall()}
@@ -159,9 +164,13 @@ async def hybrid_retrieve(
             row = chunk_map.get(r["chunk_id"])
             if row:
                 r["text"] = row[1]
-                r["source_file"] = row[2]
-                r["page_start"] = row[3]
-                r["page_end"] = row[4]
+                r["document_id"] = row[2]
+                r["document_version_id"] = row[3]
+                r["source_file"] = row[4]
+                r["page_start"] = row[5]
+                r["page_end"] = row[6]
+                metadata = row[7] or {}
+                r["section_title"] = metadata.get("section_title") or metadata.get("title")
             else:
                 r["text"] = ""
 
@@ -170,6 +179,8 @@ async def hybrid_retrieve(
     for rank, r in enumerate(fused):
         log_entry = await log_repo.add(
             QaRetrievalLog(
+                session_id=session_id,
+                message_id=message_id or 0,
                 raw_query=rewritten["raw_query"],
                 normalized_query=rewritten["normalized_query"],
                 keyword_query=rewritten["keyword_query"],

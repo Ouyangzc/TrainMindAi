@@ -28,6 +28,7 @@ public class Course extends BaseEntity
     private String ownerName;
     @JsonFormat(pattern = "yyyy-MM-dd")
     private Date startDate;
+    private Boolean allowDownload;
     private String status;
     private Integer sortOrder;
     private String delFlag;
@@ -68,6 +69,8 @@ public class Course extends BaseEntity
     public void setOwnerName(String ownerName) { this.ownerName = ownerName; }
     public Date getStartDate() { return startDate; }
     public void setStartDate(Date startDate) { this.startDate = startDate; }
+    public Boolean getAllowDownload() { return allowDownload; }
+    public void setAllowDownload(Boolean allowDownload) { this.allowDownload = allowDownload; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Integer getSortOrder() { return sortOrder; }
@@ -99,6 +102,7 @@ public class Course extends BaseEntity
                 .append("description", getDescription())
                 .append("ownerUserId", getOwnerUserId())
                 .append("startDate", getStartDate())
+                .append("allowDownload", getAllowDownload())
                 .append("status", getStatus())
                 .append("sortOrder", getSortOrder())
                 .append("delFlag", getDelFlag())

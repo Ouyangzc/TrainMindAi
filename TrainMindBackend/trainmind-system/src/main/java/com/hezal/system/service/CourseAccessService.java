@@ -5,6 +5,7 @@ import com.hezal.common.constant.TrainMindConstants;
 import com.hezal.common.exception.ServiceException;
 import com.hezal.common.utils.SecurityUtils;
 import com.hezal.system.domain.CourseUser;
+import com.hezal.system.domain.vo.student.StudentCourseContext;
 import com.hezal.system.mapper.CourseUserMapper;
 
 /** 课程级数据访问校验。 */
@@ -30,6 +31,20 @@ public class CourseAccessService
             throw new ServiceException("无权访问当前课程");
         }
         return access;
+    }
+
+    /**
+     * 校验真实学员对启用课程的有效授权。管理员不会在学生接口中自动绕过授权。
+     */
+    public StudentCourseContext requireStudentAccess(Long courseId, Long userId)
+    {
+        StudentCourseContext context = courseUserMapper.selectStudentCourseContext(
+                TrainMindConstants.DEFAULT_TENANT_ID, courseId, userId);
+        if (context == null)
+        {
+            throw new ServiceException("课程不存在、未启用或当前学员授权无效");
+        }
+        return context;
     }
 
     public void requireManageAccess(Long courseId, Long userId)

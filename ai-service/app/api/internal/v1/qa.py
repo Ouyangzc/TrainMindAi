@@ -22,6 +22,8 @@ async def answer(
         question=req.question,
         kb_version_id=req.kb_version_id,
         course_id=req.course_id,
+        session_id=req.session_id,
+        message_id=req.message_id,
     )
 
     result = await qa_answer(
@@ -34,10 +36,12 @@ async def answer(
     sources = [
         QaSource(
             chunk_id=c["chunk_id"],
-            document_id=0,
+            document_id=c["document_id"],
+            document_version_id=c["document_version_id"],
             source_file=c.get("source_file"),
             page_start=c.get("page_start"),
             page_end=c.get("page_end"),
+            section_title=c.get("section_title"),
             score=c.get("final_score"),
         )
         for c in fused
@@ -45,6 +49,8 @@ async def answer(
 
     return QaAnswerResponse(
         answer=result["answer"],
+        answer_status=("grounded" if result["reject_reason"] is None else "insufficient_evidence"),
+        knowledge_base_version_id=req.kb_version_id,
         sources=sources,
         reject_reason=result["reject_reason"],
         retrieval_log_ref=log_ref,

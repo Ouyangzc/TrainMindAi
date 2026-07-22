@@ -33,6 +33,7 @@
               <el-descriptions-item label="课程分类">{{ course?.courseCategory || '-' }}</el-descriptions-item>
               <el-descriptions-item label="主负责人">{{ course?.ownerName }}</el-descriptions-item>
               <el-descriptions-item label="开课日期">{{ course?.startDate }}</el-descriptions-item>
+              <el-descriptions-item label="学员下载">{{ course?.allowDownload ? '允许' : '禁止' }}</el-descriptions-item>
               <el-descriptions-item label="课程状态">
                 <el-tag :type="optionTagType(courseStatusOptions, course?.status || '')">
                   {{ optionLabel(courseStatusOptions, course?.status || '') }}
@@ -621,6 +622,10 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="学员下载">
+          <el-switch v-model="courseEditForm.allowDownload" />
+          <span class="download-hint">仅允许下载当前已发布知识库版本中的资料</span>
+        </el-form-item>
         <el-form-item label="课程简介">
           <el-input v-model="courseEditForm.description" type="textarea" :rows="3" maxlength="1000" show-word-limit />
         </el-form-item>
@@ -1736,6 +1741,12 @@ onBeforeUnmount(() => {
   }
 
   .muted {
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .download-hint {
+    margin-left: 10px;
     color: #909399;
     font-size: 12px;
   }

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hezal.system.mapper.StudentQaMapper">
+    <resultMap id="SessionResult" type="com.hezal.system.domain.StudentQaSession">
+        <id property="id" column="id"/><result property="tenantId" column="tenant_id"/>
+        <result property="userId" column="user_id"/><result property="courseId" column="course_id"/>
+        <result property="title" column="title"/><result property="status" column="status"/>
+        <result property="createTime" column="create_time"/><result property="updateTime" column="update_time"/>
+    </resultMap>
+    <resultMap id="MessageResult" type="com.hezal.system.domain.StudentQaMessage">
+        <id property="id" column="id"/><result property="tenantId" column="tenant_id"/>
+        <result property="sessionId" column="session_id"/><result property="userId" column="user_id"/>
+        <result property="courseId" column="course_id"/>
+        <result property="knowledgeBaseVersionId" column="knowledge_base_version_id"/>
+        <result property="role" column="role"/><result property="content" column="content"/>
+        <result property="status" column="status"/><result property="rejectReason" column="reject_reason"/>
+        <result property="retrievalLogRef" column="retrieval_log_ref"/>
+        <result property="createTime" column="create_time"/><result property="updateTime" column="update_time"/>
+    </resultMap>
+    <resultMap id="CitationResult" type="com.hezal.system.domain.StudentQaCitation">
+        <id property="id" column="id"/><result property="tenantId" column="tenant_id"/>
+        <result property="messageId" column="message_id"/><result property="chunkId" column="chunk_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="documentVersionId" column="document_version_id"/>
+        <result property="documentTitle" column="document_title"/><result property="versionNo" column="version_no"/>
+        <result property="sourceFile" column="source_file"/><result property="pageStart" column="page_start"/>
+        <result property="pageEnd" column="page_end"/><result property="sectionTitle" column="section_title"/>
+        <result property="quote" column="quote"/><result property="score" column="score"/>
+        <result property="rankNo" column="rank_no"/><result property="createTime" column="create_time"/>
+    </resultMap>
+    <select id="selectSessions" resultMap="SessionResult">
+        select * from qa_session where tenant_id=#{tenantId} and course_id=#{courseId}
+          and user_id=#{userId} and del_flag='0' and status='active'
+        order by coalesce(update_time, create_time) desc, id desc
+    </select>
+    <select id="selectSession" resultMap="SessionResult">
+        select * from qa_session where tenant_id=#{tenantId} and course_id=#{courseId}
+          and user_id=#{userId} and id=#{sessionId} and del_flag='0' and status='active'
+    </select>
+    <insert id="insertSession" parameterType="com.hezal.system.domain.StudentQaSession"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into qa_session(tenant_id,user_id,course_id,title,status,del_flag,create_by,create_time)
+        values(#{tenantId},#{userId},#{courseId},#{title},#{status},'0',#{createBy},now())
+    </insert>
+    <update id="updateSessionTitle">
+        update qa_session set title=#{title},update_time=now() where id=#{sessionId} and del_flag='0'
+    </update>
+    <update id="touchSession">
+        update qa_session set update_time=now() where id=#{sessionId} and del_flag='0'
+    </update>
+    <select id="selectMessages" resultMap="MessageResult">
+        select * from qa_message where tenant_id=#{tenantId} and session_id=#{sessionId} and del_flag='0'
+        order by id
+    </select>
+    <insert id="insertMessage" parameterType="com.hezal.system.domain.StudentQaMessage"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into qa_message(tenant_id,session_id,user_id,course_id,knowledge_base_version_id,
+          role,content,status,reject_reason,retrieval_log_ref,del_flag,create_by,create_time)
+        values(#{tenantId},#{sessionId},#{userId},#{courseId},#{knowledgeBaseVersionId},
+          #{role},#{content},#{status},#{rejectReason},#{retrievalLogRef},'0',#{createBy},now())
+    </insert>
+    <update id="completeAssistantMessage" parameterType="com.hezal.system.domain.StudentQaMessage">
+        update qa_message set content=#{content},status=#{status},reject_reason=#{rejectReason},
+          retrieval_log_ref=#{retrievalLogRef},update_time=now()
+        where id=#{id} and role='assistant' and status='pending' and del_flag='0'
+    </update>
+    <insert id="insertCitation" parameterType="com.hezal.system.domain.StudentQaCitation"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into qa_message_citation(tenant_id,message_id,chunk_id,document_id,document_version_id,
+          document_title,version_no,source_file,page_start,page_end,section_title,quote,score,rank_no,
+          del_flag,create_time)
+        values(#{tenantId},#{messageId},#{chunkId},#{documentId},#{documentVersionId},
+          #{documentTitle},#{versionNo},#{sourceFile},#{pageStart},#{pageEnd},#{sectionTitle},#{quote},
+          #{score},#{rankNo},'0',now())
+    </insert>
+    <select id="selectCitations" resultMap="CitationResult">
+        select * from qa_message_citation where tenant_id=#{tenantId} and message_id=#{messageId}
+          and del_flag='0' order by rank_no,id
+    </select>
+    <select id="selectCitation" resultMap="CitationResult">
+        select c.* from qa_message_citation c
+        join qa_message m on m.id=c.message_id and m.tenant_id=c.tenant_id and m.del_flag='0'
+        where c.tenant_id=#{tenantId} and c.message_id=#{messageId} and c.id=#{citationId}
+          and c.del_flag='0'
+    </select>
+</mapper>

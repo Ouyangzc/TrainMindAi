@@ -19,6 +19,7 @@ export * from "./system/notice";
 
 // Course 模块
 export * from "./course";
+export * from "./student";
 
 // monitor 模块
 export * from "./monitor/cache";

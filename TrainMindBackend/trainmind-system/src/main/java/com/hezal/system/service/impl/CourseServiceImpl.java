@@ -62,6 +62,10 @@ public class CourseServiceImpl implements ICourseService
         {
             course.setSortOrder(0);
         }
+        if (course.getAllowDownload() == null)
+        {
+            course.setAllowDownload(false);
+        }
         int rows = courseMapper.insertCourse(course);
         KnowledgeBase knowledgeBase = new KnowledgeBase();
         knowledgeBase.setTenantId(course.getTenantId());

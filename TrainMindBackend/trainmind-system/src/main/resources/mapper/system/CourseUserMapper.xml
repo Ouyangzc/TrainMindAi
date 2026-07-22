@@ -20,6 +20,57 @@
         <result property="userName" column="user_name"/>
         <result property="nickName" column="nick_name"/>
     </resultMap>
+    <resultMap id="StudentCourseResult" type="com.hezal.system.domain.vo.student.StudentCourseVO">
+        <id property="courseId" column="course_id"/>
+        <result property="courseCode" column="course_code"/>
+        <result property="courseName" column="course_name"/>
+        <result property="courseCategory" column="course_category"/>
+        <result property="description" column="description"/>
+        <result property="ownerName" column="owner_name"/>
+        <result property="availability" column="availability"/>
+        <result property="accessStartAt" column="access_start_at"/>
+        <result property="accessEndAt" column="access_end_at"/>
+        <result property="knowledgeBaseId" column="knowledge_base_id"/>
+        <result property="publishedVersionId" column="published_version_id"/>
+        <result property="publishedVersionNo" column="published_version_no"/>
+        <result property="allowDownload" column="allow_download"/>
+        <result property="lastVisitedAt" column="last_visited_at"/>
+    </resultMap>
+    <resultMap id="StudentCourseContextResult" type="com.hezal.system.domain.vo.student.StudentCourseContext">
+        <result property="tenantId" column="tenant_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="courseId" column="course_id"/>
+        <result property="courseUserId" column="course_user_id"/>
+        <result property="knowledgeBaseId" column="knowledge_base_id"/>
+        <result property="publishedVersionId" column="published_version_id"/>
+        <result property="publishedVersionNo" column="published_version_no"/>
+    </resultMap>
+    <sql id="selectStudentCourseVo">
+        select c.id as course_id, c.course_code, c.course_name, c.course_category,
+               c.description, c.allow_download, owner.nick_name as owner_name,
+               cu.start_at as access_start_at, cu.end_at as access_end_at,
+               kb.id as knowledge_base_id,
+               case when kbv.status = 'published' then kbv.id end as published_version_id,
+               case when kbv.status = 'published' then kbv.version_no end as published_version_no,
+               (select max(a.occurred_at) from student_learning_activity a
+                where a.tenant_id=cu.tenant_id and a.user_id=cu.user_id
+                  and a.course_id=cu.course_id and a.del_flag='0') as last_visited_at,
+               case
+                 when cu.access_status != 'active' then 'access_disabled'
+                 when c.status != 'active' then 'course_disabled'
+                 when cu.start_at is not null and cu.start_at > now() then 'not_started'
+                 when cu.end_at is not null and cu.end_at &lt;= now() then 'expired'
+                 when kbv.id is null or kbv.status != 'published' then 'content_preparing'
+                 else 'available'
+               end as availability
+        from course_user cu
+        join course c on c.id = cu.course_id and c.tenant_id = cu.tenant_id and c.del_flag = '0'
+        left join sys_user owner on owner.user_id = c.owner_user_id
+        left join knowledge_base kb on kb.tenant_id = c.tenant_id
+          and kb.course_id = c.id and kb.del_flag = '0'
+        left join knowledge_base_version kbv on kbv.id = kb.current_version_id
+          and kbv.knowledge_base_id = kb.id and kbv.del_flag = '0'
+    </sql>
     <sql id="selectCourseUserVo">
         select cu.*, u.user_name, u.nick_name
         from course_user cu
@@ -45,6 +96,48 @@
           and cu.del_flag = '0' and cu.access_status = 'active'
           and (cu.start_at is null or cu.start_at &lt;= now())
           and (cu.end_at is null or cu.end_at &gt; now())
+    </select>
+    <select id="selectStudentCourses" resultMap="StudentCourseResult">
+        <include refid="selectStudentCourseVo"/>
+        where cu.tenant_id = #{tenantId} and cu.user_id = #{userId}
+          and cu.access_role = 'student' and cu.del_flag = '0'
+        order by (select max(a.occurred_at) from student_learning_activity a
+                  where a.tenant_id=cu.tenant_id and a.user_id=cu.user_id
+                    and a.course_id=cu.course_id and a.del_flag='0') desc nulls last,
+                 case
+                   when cu.access_status = 'active' and c.status = 'active'
+                     and (cu.start_at is null or cu.start_at &lt;= now())
+                     and (cu.end_at is null or cu.end_at > now())
+                     and kbv.id is not null and kbv.status = 'published' then 1
+                   when cu.access_status = 'active' and c.status = 'active'
+                     and (cu.start_at is null or cu.start_at &lt;= now())
+                     and (cu.end_at is null or cu.end_at > now()) then 2
+                   else 3
+                 end,
+                 c.sort_order, c.id desc
+    </select>
+    <select id="selectStudentCourse" resultMap="StudentCourseResult">
+        <include refid="selectStudentCourseVo"/>
+        where cu.tenant_id = #{tenantId} and cu.course_id = #{courseId}
+          and cu.user_id = #{userId} and cu.access_role = 'student' and cu.del_flag = '0'
+    </select>
+    <select id="selectStudentCourseContext" resultMap="StudentCourseContextResult">
+        select cu.tenant_id, cu.user_id, cu.course_id, cu.id as course_user_id,
+               kb.id as knowledge_base_id,
+               case when kbv.status = 'published' then kbv.id end as published_version_id,
+               case when kbv.status = 'published' then kbv.version_no end as published_version_no
+        from course_user cu
+        join course c on c.id = cu.course_id and c.tenant_id = cu.tenant_id
+          and c.del_flag = '0' and c.status = 'active'
+        left join knowledge_base kb on kb.tenant_id = c.tenant_id
+          and kb.course_id = c.id and kb.del_flag = '0'
+        left join knowledge_base_version kbv on kbv.id = kb.current_version_id
+          and kbv.knowledge_base_id = kb.id and kbv.del_flag = '0'
+        where cu.tenant_id = #{tenantId} and cu.course_id = #{courseId}
+          and cu.user_id = #{userId} and cu.access_role = 'student'
+          and cu.del_flag = '0' and cu.access_status = 'active'
+          and (cu.start_at is null or cu.start_at &lt;= now())
+          and (cu.end_at is null or cu.end_at > now())
     </select>
     <insert id="insertCourseUser" parameterType="CourseUser"
             useGeneratedKeys="true" keyProperty="id">

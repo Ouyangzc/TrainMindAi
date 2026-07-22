@@ -253,11 +253,7 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService
     @Override
     public List<KnowledgeBaseVersionDocument> selectPublishedDocuments(Long courseId, Long userId)
     {
-        courseAccessService.requireAccess(courseId, userId);
-        if (courseMapper.selectCourseById(courseId) == null)
-        {
-            throw new ServiceException("课程不存在");
-        }
+        courseAccessService.requireStudentAccess(courseId, userId);
         return knowledgeBaseMapper.selectPublishedDocuments(courseId);
     }
 

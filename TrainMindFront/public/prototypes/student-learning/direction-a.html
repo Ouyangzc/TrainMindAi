@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>方向 A · 资料中心型</title><link rel="stylesheet" href="shared.css">
+<style>
+  body { background:#f4f7fb; } .a-shell{display:grid;grid-template-columns:250px 1fr;min-height:calc(100vh - 64px)}
+  .side{padding:26px 18px;border-right:1px solid #e4e9f0;background:#fff}.side h3{margin:0 10px 18px;font-size:13px;color:#98a2b3}.side button{display:flex;width:100%;gap:10px;align-items:center;padding:12px;border:0;border-radius:10px;background:none;color:#475467;text-align:left;cursor:pointer}.side button.active{background:#edf3ff;color:#2454b8;font-weight:750}.side .count{margin-left:auto;font-size:12px}
+  .content{padding:34px 38px}.hero{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:26px}.hero h1{margin:6px 0;font-size:30px}.hero p{margin:0;color:#667085}.search{display:flex;width:min(520px,100%);gap:10px}.search input{flex:1;padding:12px 15px;border:1px solid #d9e0ea;border-radius:11px;background:#fff;outline:none}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}.stat{padding:18px;border:1px solid #e5e9f0;border-radius:14px;background:#fff}.stat b{display:block;margin-top:8px;font-size:25px}.panel{overflow:hidden;border:1px solid #e5e9f0;border-radius:16px;background:#fff}.panel-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #eef1f5}.panel-head h2{margin:0;font-size:18px}.doc{display:grid;grid-template-columns:minmax(240px,1fr) 160px 90px 130px 90px;align-items:center;padding:16px 20px;border-bottom:1px solid #f0f2f5}.doc:last-child{border:0}.doc-name{display:flex;align-items:center;gap:12px}.file{display:grid;width:40px;height:46px;place-items:center;border-radius:8px;background:#edf3ff;color:#246bfd;font-size:11px;font-weight:850}.doc strong{display:block;font-size:14px}.doc small{color:#98a2b3}.download{border:0;background:none;color:#246bfd;cursor:pointer;font-weight:700}.toast{position:fixed;right:24px;bottom:24px;padding:12px 18px;border-radius:10px;background:#172b4d;color:#fff;opacity:0;transform:translateY(10px);transition:.2s}.toast.show{opacity:1;transform:none}
+  @media(max-width:900px){.a-shell{grid-template-columns:1fr}.side{display:none}.content{padding:22px 14px}.hero{align-items:flex-start;gap:18px;flex-direction:column}.stats{grid-template-columns:1fr}.doc{grid-template-columns:1fr 70px}.doc>span:not(:last-child){display:none}}
+</style></head>
+<body>
+<header class="topbar"><div class="brand"><div class="brand-mark">T</div>TrainMind 学习中心</div><nav class="prototype-switch"><a class="active" href="direction-a.html">A 资料中心</a><a href="direction-b.html">B 课程学习</a><a href="direction-c.html">C AI 助教</a></nav><div class="top-actions"><a class="back-gallery" href="index.html">方向选择</a><div class="avatar">林</div></div></header>
+<main class="a-shell">
+  <aside class="side"><h3>我的课程</h3><button class="active" data-course="all">▦ 全部资料 <span class="count">12</span></button><button data-course="737">✈ B737 基础培训 <span class="count">8</span></button><button data-course="safety">◇ 机坪安全规范 <span class="count">4</span></button><h3 style="margin-top:30px">快捷筛选</h3><button data-type="PDF">▤ PDF 文件</button><button data-type="PPTX">▥ 演示文稿</button><button data-type="XLSX">▦ 表格文件</button></aside>
+  <section class="content">
+    <div class="hero"><div><div class="eyebrow">DIRECTION A · RESOURCE FIRST</div><h1>我的课程资料</h1><p>按课程、模块和文件类型快速找到正式发布的学习资料。</p></div><div class="search"><input id="search" placeholder="搜索资料名称、文件名或模块"><button class="btn btn-primary" onclick="filterDocs()">搜索</button></div></div>
+    <div class="stats"><div class="stat"><span class="muted">已加入课程</span><b>2</b></div><div class="stat"><span class="muted">可用资料</span><b id="docCount">12</b></div><div class="stat"><span class="muted">最近发布</span><b>V3</b><small class="muted">B737 基础培训</small></div></div>
+    <div class="panel"><div class="panel-head"><h2 id="panelTitle">全部已发布资料</h2><span class="tag">仅展示正式发布版本</span></div><div id="docs"></div></div>
+  </section>
+</main><div class="toast" id="toast">原型演示：已触发文件下载</div>
+<script>
+const data=[
+ {c:'737',type:'PDF',name:'B737 飞机系统概述',file:'B737-System-Overview.pdf',module:'M1 基础概论',ver:'V2',date:'07-20'},
+ {c:'737',type:'PPTX',name:'液压系统原理与维护',file:'Hydraulic-System.pptx',module:'M2 液压系统',ver:'V3',date:'07-18'},
+ {c:'737',type:'PDF',name:'发动机日常检查手册',file:'Engine-Inspection.pdf',module:'M3 动力装置',ver:'V1',date:'07-16'},
+ {c:'737',type:'XLSX',name:'航线检查项目清单',file:'Line-Check-List.xlsx',module:'M4 维护程序',ver:'V4',date:'07-14'},
+ {c:'safety',type:'PDF',name:'机坪作业安全规范',file:'Apron-Safety.pdf',module:'公共资料',ver:'V2',date:'07-12'},
+ {c:'safety',type:'PPTX',name:'危险源识别与报告',file:'Hazard-Report.pptx',module:'S2 风险识别',ver:'V1',date:'07-10'}];
+let course='all',type='';
+function render(){const q=document.querySelector('#search').value.toLowerCase();const rows=data.filter(x=>(course==='all'||x.c===course)&&(!type||x.type===type)&&(!q||Object.values(x).join(' ').toLowerCase().includes(q)));document.querySelector('#docs').innerHTML=rows.length?rows.map(x=>`<div class="doc"><div class="doc-name"><div class="file">${x.type}</div><div><strong>${x.name}</strong><small>${x.file}</small></div></div><span>${x.module}</span><span>${x.ver}</span><span>${x.date} 发布</span><button class="download" onclick="downloadMock()">下载</button></div>`).join(''):'<div class="empty">没有匹配的已发布资料</div>';document.querySelector('#docCount').textContent=rows.length;}
+function filterDocs(){render()} function downloadMock(){const t=document.querySelector('#toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
+document.querySelectorAll('[data-course]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.side button').forEach(x=>x.classList.remove('active'));b.classList.add('active');course=b.dataset.course;type='';document.querySelector('#panelTitle').textContent=b.textContent.trim().replace(/\d+$/,'');render()});
+document.querySelectorAll('[data-type]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.side button').forEach(x=>x.classList.remove('active'));b.classList.add('active');course='all';type=b.dataset.type;render()});document.querySelector('#search').addEventListener('input',render);render();
+</script></body></html>

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hezal.system.mapper.StudentPublishedContentMapper">
+    <resultMap id="StudentPublishedDocumentResult" type="com.hezal.system.domain.vo.student.StudentPublishedDocumentVO">
+        <id property="documentId" column="document_id"/>
+        <result property="documentVersionId" column="document_version_id"/>
+        <result property="title" column="title"/>
+        <result property="documentType" column="document_type"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="originalFilename" column="original_filename"/>
+        <result property="fileExt" column="file_ext"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="moduleId" column="module_id"/>
+        <result property="moduleCode" column="module_code"/>
+        <result property="moduleName" column="module_name"/>
+        <result property="moduleDescription" column="module_description"/>
+        <result property="moduleSortOrder" column="module_sort_order"/>
+    </resultMap>
+    <sql id="selectPublishedDocumentVo">
+        select d.id as document_id, v.id as document_version_id, d.title, d.document_type,
+               v.version_no, v.original_filename, v.file_ext, v.file_size,
+               v.module_id, m.module_code, m.module_name,
+               m.description as module_description, m.sort_order as module_sort_order
+        from knowledge_base_version_document s
+        join knowledge_base_version kbv on kbv.id = s.knowledge_base_version_id
+          and kbv.del_flag = '0' and kbv.status = 'published'
+        join knowledge_base kb on kb.id = kbv.knowledge_base_id
+          and kb.del_flag = '0' and kb.current_version_id = kbv.id
+        join course_document d on d.id = s.document_id
+          and d.tenant_id = s.tenant_id and d.course_id = kb.course_id and d.del_flag = '0'
+        join course_document_version v on v.id = s.document_version_id
+          and v.tenant_id = s.tenant_id and v.document_id = d.id and v.del_flag = '0'
+        left join course_module m on m.id = v.module_id
+          and m.tenant_id = s.tenant_id and m.course_id = kb.course_id
+          and m.del_flag = '0' and m.status = 'active'
+    </sql>
+    <select id="selectPublishedDocuments" resultMap="StudentPublishedDocumentResult">
+        <include refid="selectPublishedDocumentVo"/>
+        where s.tenant_id = #{tenantId} and kb.course_id = #{courseId}
+          and s.knowledge_base_version_id = #{versionId} and s.del_flag = '0'
+          and (v.module_id is null or m.id is not null)
+        <if test="query != null and query.moduleId != null">
+          and v.module_id = #{query.moduleId}
+        </if>
+        <if test="query != null and query.keyword != null and query.keyword != ''">
+          and (lower(d.title) like concat('%', lower(#{query.keyword}), '%')
+               or lower(v.original_filename) like concat('%', lower(#{query.keyword}), '%'))
+        </if>
+        <if test="query != null and query.fileExt != null and query.fileExt != ''">
+          and lower(v.file_ext) = lower(#{query.fileExt})
+        </if>
+        order by m.sort_order nulls first, m.id nulls first, d.id
+    </select>
+    <select id="selectPublishedDocument" resultMap="StudentPublishedDocumentResult">
+        <include refid="selectPublishedDocumentVo"/>
+        where s.tenant_id = #{tenantId} and kb.course_id = #{courseId}
+          and s.knowledge_base_version_id = #{versionId} and s.document_id = #{documentId}
+          and s.del_flag = '0' and (v.module_id is null or m.id is not null)
+    </select>
+    <select id="selectPublishedModuleName" resultType="String">
+        select max(m.module_name)
+        from knowledge_base_version_document s
+        join knowledge_base_version kbv on kbv.id=s.knowledge_base_version_id
+          and kbv.status='published' and kbv.del_flag='0'
+        join knowledge_base kb on kb.id=kbv.knowledge_base_id
+          and kb.course_id=#{courseId} and kb.current_version_id=kbv.id and kb.del_flag='0'
+        join course_document_version v on v.id=s.document_version_id
+          and v.tenant_id=s.tenant_id and v.del_flag='0'
+        join course_module m on m.id=v.module_id and m.tenant_id=s.tenant_id
+          and m.course_id=kb.course_id and m.status='active' and m.del_flag='0'
+        where s.tenant_id=#{tenantId} and s.knowledge_base_version_id=#{versionId}
+          and s.del_flag='0' and m.id=#{moduleId}
+    </select>
+</mapper>

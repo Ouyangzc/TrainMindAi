@@ -16,6 +16,7 @@ create table if not exists course (
   description       varchar(1000)   default null,
   owner_user_id     int8            default null,
   start_date        date            default null,
+  allow_download    boolean         default false not null,
   status            varchar(20)     default 'draft' not null,
   sort_order        int4            default 0,
   del_flag          char(1)         default '0',
@@ -29,7 +30,8 @@ create table if not exists course (
 
 alter table course
   add column if not exists course_category varchar(100) default '',
-  add column if not exists start_date date default null;
+  add column if not exists start_date date default null,
+  add column if not exists allow_download boolean default false not null;
 
 comment on table course                  is '课程表';
 comment on column course.id              is '课程ID';
@@ -40,6 +42,7 @@ comment on column course.course_category is '课程分类';
 comment on column course.description     is '课程简介';
 comment on column course.owner_user_id   is '课程讲师或负责人用户ID';
 comment on column course.start_date      is '开课日期';
+comment on column course.allow_download  is '是否允许学员下载当前已发布资料';
 comment on column course.status          is '课程状态（draft草稿 active正常 disabled停用 archived归档）';
 comment on column course.sort_order      is '显示顺序';
 comment on column course.del_flag        is '删除标志（0代表存在 2代表删除）';

@@ -25,6 +25,7 @@ export interface Course extends BaseEntity {
   ownerUserId?: number
   ownerName?: string
   startDate?: string
+  allowDownload?: boolean
   status?: CourseStatus
   sortOrder?: number
   delFlag?: string

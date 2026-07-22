@@ -158,6 +158,10 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="学员下载" prop="allowDownload">
+          <el-switch v-model="courseForm.allowDownload" />
+          <span class="download-hint">仅允许下载当前已发布知识库版本中的资料</span>
+        </el-form-item>
         <el-form-item label="课程简介" prop="description">
           <el-input v-model="courseForm.description" type="textarea" :rows="3" maxlength="1000" show-word-limit />
         </el-form-item>
@@ -204,6 +208,7 @@ const courseForm = reactive<Course>({
   courseCategory: '',
   description: '',
   startDate: undefined,
+  allowDownload: false,
   status: 'active',
   sortOrder: 0,
   remark: ''
@@ -267,6 +272,7 @@ function resetCourseForm() {
     courseCategory: '',
     description: '',
     startDate: undefined,
+    allowDownload: false,
     status: 'active',
     sortOrder: 0,
     remark: ''
@@ -345,6 +351,12 @@ getList()
 
 <style scoped lang="scss">
 .course-page {
+  .download-hint {
+    margin-left: 10px;
+    color: #909399;
+    font-size: 12px;
+  }
+
   .course-summary {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));

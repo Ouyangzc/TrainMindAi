@@ -47,7 +47,7 @@ async def qa_answer(
     """
     # 拒答检查：最低分阈值
     scores = [c.get("final_score", 0) for c in context_chunks]
-    if max(scores) < _MIN_SCORE_THRESHOLD:
+    if not scores or max(scores) < _MIN_SCORE_THRESHOLD:
         return {
             "answer": "",
             "reject_reason": "low_score",
