@@ -45,13 +45,6 @@
           </router-link>
         </nav>
 
-        <div class="scope-note">
-          <el-icon><Lock /></el-icon>
-          <div>
-            <strong>课程内容已隔离</strong>
-            <span>问答和资料仅来自当前课程发布版本</span>
-          </div>
-        </div>
       </aside>
 
       <main v-loading="loading" class="course-workspace">
@@ -64,7 +57,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, ChatDotRound, Clock, Collection, FolderOpened, Lock } from '@element-plus/icons-vue'
+import { ArrowLeft, ChatDotRound, Clock, Collection, FolderOpened } from '@element-plus/icons-vue'
 import CourseSwitcher from './components/CourseSwitcher.vue'
 import { listMyCourses, recordStudentActivity } from '@/api/student'
 import type { StudentCourse } from '@/types'
@@ -174,10 +167,6 @@ watch(() => route.params.courseId, loadContext, { immediate: true })
 .course-nav nav { margin-top: 19px; }
 .nav-item { margin: 5px 0; padding: 12px; display: flex; align-items: center; gap: 11px; border-radius: 10px; font-size: 14px; }
 .nav-item:hover, .nav-item.router-link-active { color: #fff; background: #1e4a64; }
-.scope-note { margin-top: auto; padding: 14px 12px; display: flex; gap: 9px; border: 1px solid #28526a; border-radius: 12px; }
-.scope-note strong, .scope-note span { display: block; }
-.scope-note strong { color: #fff; font-size: 12px; }
-.scope-note span { margin-top: 4px; color: #7899ad; font-size: 11px; line-height: 1.5; }
 .course-workspace { min-width: 0; min-height: 520px; padding: 30px clamp(20px, 4vw, 46px); }
 .course-space__error { padding-top: 60px; }
 
@@ -186,7 +175,7 @@ watch(() => route.params.courseId, loadContext, { immediate: true })
   .back-link span, .version-state { display: none; }
   .course-space__layout { display: block; min-height: calc(100vh - 120px); }
   .course-nav { padding: 8px 10px; display: block; overflow-x: auto; white-space: nowrap; }
-  .course-identity, .scope-note { display: none; }
+  .course-identity { display: none; }
   .course-nav nav { margin: 0; display: flex; gap: 5px; }
   .nav-item { flex: 0 0 auto; margin: 0; padding: 10px 12px; }
   .course-workspace { padding: 22px 15px; }

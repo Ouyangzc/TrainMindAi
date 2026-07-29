@@ -6,6 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import com.hezal.common.exception.ServiceException;
 import com.hezal.system.ai.AiQaClient;
 import com.hezal.system.domain.StudentQaCitation;
@@ -70,6 +71,20 @@ public class StudentQaServiceImpl implements IStudentQaService
         session.setCreateBy(userId.toString());
         qaMapper.insertSession(session);
         return session;
+    }
+
+    @Override
+    @Transactional
+    public void deleteSession(Long courseId, Long sessionId, Long userId)
+    {
+        StudentCourseContext context = requirePublishedContext(courseId, userId);
+        requireSession(context, courseId, sessionId, userId);
+        qaMapper.deleteCitations(context.getTenantId(), sessionId);
+        qaMapper.deleteMessages(context.getTenantId(), sessionId);
+        if (qaMapper.deleteSession(context.getTenantId(), courseId, userId, sessionId) != 1)
+        {
+            throw new ServiceException("问答会话删除失败");
+        }
     }
 
     @Override

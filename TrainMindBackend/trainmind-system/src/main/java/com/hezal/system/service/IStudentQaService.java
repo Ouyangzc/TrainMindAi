@@ -12,6 +12,8 @@ public interface IStudentQaService
 
     StudentQaSession createSession(Long courseId, Long userId);
 
+    void deleteSession(Long courseId, Long sessionId, Long userId);
+
     List<StudentQaMessage> selectMessages(Long courseId, Long sessionId, Long userId);
 
     StudentQaMessage ask(Long courseId, Long sessionId, Long userId, String question);
