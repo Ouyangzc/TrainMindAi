@@ -1,8 +1,10 @@
 """pgvector 实现（MVP）。向量存 ai.chunk_embedding，余弦检索用 <=> 运算符。"""
 
-from sqlalchemy import select, text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.kb import ChunkEmbedding
 from app.vectorstore.base import VectorHit, VectorStore
 
@@ -67,9 +69,10 @@ class PgVectorStore(VectorStore):
             ORDER BY ce.embedding <=> :query_vec
             LIMIT :top_k
         """
-        result = await self.session.execute(
-            text(sql), {**params, "top_k": top_k}
+        statement = text(sql).bindparams(
+            bindparam("query_vec", type_=Vector(settings.embedding_dim))
         )
+        result = await self.session.execute(statement, {**params, "top_k": top_k})
         rows = result.fetchall()
         return [VectorHit(chunk_id=row[0], score=float(row[1])) for row in rows]
 

@@ -3,7 +3,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pgvector.sqlalchemy import Vector
 
+from app.core.config import settings
 from app.vectorstore.pgvector_store import PgVectorStore
 
 
@@ -27,3 +29,8 @@ async def test_search_calls_execute(mock_session) -> None:  # noqa: ANN001
     assert hits[0].chunk_id == 1
     assert abs(hits[0].score - 0.95) < 0.001
     assert hits[1].chunk_id == 2
+
+    statement = mock_session.execute.await_args.args[0]
+    query_bind = statement._bindparams["query_vec"]
+    assert isinstance(query_bind.type, Vector)
+    assert query_bind.type.dim == settings.embedding_dim
