@@ -15,6 +15,10 @@ public interface StudentQaMapper
             @Param("courseId") Long courseId, @Param("userId") Long userId,
             @Param("sessionId") Long sessionId);
     int insertSession(StudentQaSession session);
+    int deleteSession(@Param("tenantId") Long tenantId, @Param("courseId") Long courseId,
+            @Param("userId") Long userId, @Param("sessionId") Long sessionId);
+    int deleteMessages(@Param("tenantId") Long tenantId, @Param("sessionId") Long sessionId);
+    int deleteCitations(@Param("tenantId") Long tenantId, @Param("sessionId") Long sessionId);
     int updateSessionTitle(@Param("sessionId") Long sessionId, @Param("title") String title);
     int touchSession(Long sessionId);
     List<StudentQaMessage> selectMessages(@Param("tenantId") Long tenantId,

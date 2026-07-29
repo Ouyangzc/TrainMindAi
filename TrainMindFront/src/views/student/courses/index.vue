@@ -50,7 +50,7 @@
             >
               <div class="course-cover" :class="`course-cover--${index % 4}`">
                 <span>{{ course.courseCategory || '课程学习' }}</span>
-                <strong>{{ course.courseName.slice(0, 1) }}</strong>
+                <strong>{{ course.courseName }}</strong>
                 <small>知识库 V{{ course.publishedVersionNo }}</small>
               </div>
               <div class="course-card__body">
@@ -272,7 +272,19 @@ onMounted(loadCourses)
     border-radius: 50%;
   }
   span { font-size: 12px; opacity: 0.8; }
-  strong { display: block; margin-top: 13px; font-size: 34px; font-weight: 500; }
+  strong {
+    position: relative;
+    z-index: 1;
+    display: -webkit-box;
+    max-width: calc(100% - 72px);
+    margin-top: 12px;
+    overflow: hidden;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
   small { position: absolute; right: 18px; bottom: 15px; opacity: 0.78; }
 }
 .course-cover--1 { background: linear-gradient(135deg, #4253a8, #7b70d3); }

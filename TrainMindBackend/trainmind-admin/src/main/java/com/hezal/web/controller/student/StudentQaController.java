@@ -3,6 +3,7 @@ package com.hezal.web.controller.student;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,6 +38,14 @@ public class StudentQaController extends BaseController
     public AjaxResult createSession(@PathVariable Long courseId)
     {
         return success(studentQaService.createSession(courseId, getUserId()));
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @DeleteMapping("/sessions/{sessionId}")
+    public AjaxResult deleteSession(@PathVariable Long courseId, @PathVariable Long sessionId)
+    {
+        studentQaService.deleteSession(courseId, sessionId, getUserId());
+        return success();
     }
 
     @PreAuthorize("isAuthenticated()")

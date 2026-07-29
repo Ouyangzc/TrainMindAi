@@ -43,6 +43,23 @@
         insert into qa_session(tenant_id,user_id,course_id,title,status,del_flag,create_by,create_time)
         values(#{tenantId},#{userId},#{courseId},#{title},#{status},'0',#{createBy},now())
     </insert>
+    <update id="deleteSession">
+        update qa_session set del_flag='2',status='deleted',update_by=#{userId},update_time=now()
+        where tenant_id=#{tenantId} and course_id=#{courseId} and user_id=#{userId}
+          and id=#{sessionId} and del_flag='0'
+    </update>
+    <update id="deleteMessages">
+        update qa_message set del_flag='2',update_time=now()
+        where tenant_id=#{tenantId} and session_id=#{sessionId} and del_flag='0'
+    </update>
+    <update id="deleteCitations">
+        update qa_message_citation c set del_flag='2',update_time=now()
+        where c.tenant_id=#{tenantId} and c.del_flag='0'
+          and exists (
+            select 1 from qa_message m
+            where m.tenant_id=c.tenant_id and m.id=c.message_id and m.session_id=#{sessionId}
+          )
+    </update>
     <update id="updateSessionTitle">
         update qa_session set title=#{title},update_time=now() where id=#{sessionId} and del_flag='0'
     </update>

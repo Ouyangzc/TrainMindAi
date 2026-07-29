@@ -42,6 +42,13 @@ export function createQaSession(courseId: number): Promise<StudentQaSessionResul
   })
 }
 
+export function deleteQaSession(courseId: number, sessionId: number) {
+  return request({
+    url: `/student/courses/${courseId}/chat/sessions/${sessionId}`,
+    method: 'delete'
+  })
+}
+
 export function listQaMessages(courseId: number, sessionId: number): Promise<StudentQaMessageListResult> {
   return request({
     url: `/student/courses/${courseId}/chat/sessions/${sessionId}`,

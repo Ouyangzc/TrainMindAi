@@ -19,21 +19,28 @@
           <el-skeleton :rows="4" animated />
         </div>
         <el-empty v-else-if="!sessions.length" :image-size="58" description="还没有历史对话" />
-        <button
+        <div
           v-for="session in sessions"
           v-else
           :key="session.id"
-          type="button"
           class="session-item"
           :class="{ 'session-item--active': session.id === activeSessionId }"
-          @click="selectSession(session.id)"
         >
-          <el-icon><ChatLineRound /></el-icon>
-          <span>
-            <strong>{{ session.title }}</strong>
-            <small>{{ formatSessionTime(session.updateTime || session.createTime) }}</small>
-          </span>
-        </button>
+          <button type="button" class="session-item__main" @click="selectSession(session.id)">
+            <el-icon><ChatLineRound /></el-icon>
+            <span>
+              <strong>{{ session.title }}</strong>
+              <small>{{ formatSessionTime(session.updateTime || session.createTime) }}</small>
+            </span>
+          </button>
+          <el-button
+            class="session-item__delete"
+            link
+            :icon="Delete"
+            aria-label="删除对话"
+            @click="removeSession(session)"
+          />
+        </div>
       </aside>
 
       <div class="chat-panel">
@@ -134,12 +141,12 @@
 
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowRight, ChatLineRound, CircleClose, Plus, Promotion, Refresh, Warning
+  ArrowRight, ChatLineRound, CircleClose, Delete, Plus, Promotion, Refresh, Warning
 } from '@element-plus/icons-vue'
 import {
-  askCourseQuestion, createQaSession, listQaMessages, listQaSessions
+  askCourseQuestion, createQaSession, deleteQaSession, listQaMessages, listQaSessions
 } from '@/api/student'
 import type { StudentQaCitation, StudentQaMessage, StudentQaSession } from '@/types'
 
@@ -203,6 +210,23 @@ function startNewConversation() {
   activeSessionId.value = undefined
   messages.value = []
   question.value = ''
+}
+
+async function removeSession(session: StudentQaSession) {
+  if (sending.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除对话“${session.title}”吗？`,
+      '删除历史对话',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    await deleteQaSession(courseId.value, session.id)
+    sessions.value = sessions.value.filter((item: StudentQaSession) => item.id !== session.id)
+    if (activeSessionId.value === session.id) startNewConversation()
+    ElMessage.success('对话已删除')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error('对话删除失败')
+  }
 }
 
 async function ensureSession() {
@@ -299,9 +323,12 @@ watch(() => route.params.courseId, () => {
 .sessions-panel { padding: 17px 12px; background: #f7f9fc; border-right: 1px solid #e6ebf1; }
 .panel-title { padding: 0 7px 12px; display: flex; align-items: center; justify-content: space-between; }
 .session-skeleton { padding: 8px; }
-.session-item { width: 100%; margin: 3px 0; padding: 11px 10px; display: flex; align-items: flex-start; gap: 9px; text-align: left; color: #5b687a; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
+.session-item { width: 100%; margin: 3px 0; display: flex; align-items: center; color: #5b687a; border-radius: 10px; background: transparent; }
 .session-item:hover, .session-item--active { color: #225e91; background: #e9f2fb; }
-.session-item > span { min-width: 0; flex: 1; }
+.session-item__main { min-width: 0; padding: 11px 4px 11px 10px; display: flex; flex: 1; align-items: flex-start; gap: 9px; text-align: left; color: inherit; border: 0; background: transparent; cursor: pointer; }
+.session-item__main > span { min-width: 0; flex: 1; }
+.session-item__delete { margin-right: 5px; opacity: 0; }
+.session-item:hover .session-item__delete, .session-item--active .session-item__delete { opacity: 1; }
 .session-item strong, .session-item small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .session-item strong { color: inherit; font-size: 13px; font-weight: 600; }
 .session-item small { margin-top: 5px; color: #9aa4b2; font-size: 11px; }
