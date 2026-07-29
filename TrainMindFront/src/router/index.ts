@@ -92,60 +92,9 @@ export const constantRoutes = [
   }
 ]
 
-// 动态路由，基于用户权限动态去加载
+// 动态路由，基于用户权限动态去加载。
+// 注意：可配置业务菜单必须来自后端 sys_menu，不应在这里硬编码。
 export const dynamicRoutes = [
-  {
-    path: '/student',
-    component: Layout,
-    roles: ['student'],
-    children: [
-      {
-        path: 'courses',
-        component: () => import('@/views/student/courses/index.vue'),
-        name: 'StudentCourses',
-        meta: { title: '我的课程', icon: 'education' }
-      },
-      {
-        path: 'courses/:courseId(\\d+)',
-        component: () => import('@/views/student/course-space/index.vue'),
-        name: 'StudentCourseSpace',
-        redirect: to => `/student/courses/${to.params.courseId}/assistant`,
-        meta: { title: '课程空间', activeMenu: '/student/courses' },
-        children: [
-          {
-            path: 'assistant',
-            component: () => import('@/views/student/course-space/assistant.vue'),
-            name: 'StudentCourseAssistant',
-            meta: { title: 'AI 学习助教', studentSection: 'assistant' }
-          },
-          {
-            path: 'outline',
-            component: () => import('@/views/student/course-space/outline.vue'),
-            name: 'StudentCourseOutline',
-            meta: { title: '课程目录', studentSection: 'outline' }
-          },
-          {
-            path: 'library',
-            component: () => import('@/views/student/course-space/library.vue'),
-            name: 'StudentCourseLibrary',
-            meta: { title: '资料库', studentSection: 'library' }
-          },
-          {
-            path: 'activities',
-            component: () => import('@/views/student/course-space/activities.vue'),
-            name: 'StudentCourseActivities',
-            meta: { title: '学习记录', studentSection: 'activities' }
-          },
-          {
-            path: 'documents/:documentId(\\d+)/preview',
-            component: () => import('@/views/student/course-space/document-preview.vue'),
-            name: 'StudentDocumentPreview',
-            meta: { title: '资料预览', studentSection: 'library' }
-          }
-        ]
-      }
-    ]
-  },
   {
     path: '/course/detail',
     component: Layout,

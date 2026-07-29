@@ -24,7 +24,13 @@ import { useRoute, useRouter } from 'vue-router'
 type StudentSection = 'assistant' | 'outline' | 'library' | 'activities'
 const route = useRoute()
 const router = useRouter()
-const section = computed(() => (route.meta.studentSection || 'assistant') as StudentSection)
+const section = computed<StudentSection>(() => {
+  const lastSegment = route.path.split('/').filter(Boolean).at(-1)
+  if (lastSegment === 'outline' || lastSegment === 'library' || lastSegment === 'activities') {
+    return lastSegment
+  }
+  return 'assistant'
+})
 const meta = {
   assistant: { kicker: 'COURSE AI', title: 'AI 学习助教', description: '回答将仅依据当前课程已发布资料。', pending: '问答界面将在下一项任务接入' },
   outline: { kicker: 'COURSE OUTLINE', title: '课程目录', description: '按课程模块查看当前发布的学习资料。', pending: '课程目录内容将在后续任务接入' },

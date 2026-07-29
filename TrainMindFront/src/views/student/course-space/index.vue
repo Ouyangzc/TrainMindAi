@@ -87,7 +87,13 @@ const navigation = [
 ]
 
 const courseId = computed(() => Number(route.params.courseId))
-const activeSection = computed(() => (route.meta.studentSection || 'assistant') as StudentSection)
+const activeSection = computed<StudentSection>(() => {
+  const lastSegment = route.path.split('/').filter(Boolean).at(-1)
+  if (lastSegment === 'outline' || lastSegment === 'library' || lastSegment === 'activities') {
+    return lastSegment
+  }
+  return 'assistant'
+})
 const availableCourses = computed(() => courses.value.filter(
   (item: StudentCourse) => item.availability === 'available'
 ))

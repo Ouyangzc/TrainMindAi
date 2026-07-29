@@ -1,7 +1,7 @@
 -- 学员端验收夹具。账号 student_accept_a / student_accept_b，密码 admin123。
 -- 使用 9100 段固定 ID，可重复执行，不覆盖现有业务行。
 
-\ir trainmind_student_role_postgresql.sql
+\ir trainmind_student_menu_postgresql.sql
 
 insert into sys_user(user_id,dept_id,user_name,nick_name,user_type,email,phonenumber,sex,
   password,status,del_flag,create_by,create_time,remark)
