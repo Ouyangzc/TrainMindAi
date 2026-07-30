@@ -29,6 +29,8 @@ async def process_fixed_size_chunk(
 ) -> list[KnowledgeChunk]:
     """固定长度切分（按字符），兜底策略。"""
     chunks: list[KnowledgeChunk] = []
+    chunk_size = max(chunk_size, 1)
+    effective_overlap = min(max(chunk_overlap, 0), chunk_size - 1)
 
     full_text = ""
     page_map: list[tuple[int, int]] = []
@@ -73,7 +75,7 @@ async def process_fixed_size_chunk(
             chunk_strategy_version=strategy_version,
         )
         chunks.append(chunk)
-        start = end - chunk_overlap if end < text_len else text_len
+        start = end - effective_overlap if end < text_len else text_len
 
     return chunks
 
@@ -86,6 +88,8 @@ async def process_title_chunk(
     document_version_id: int,
     pages: list[DocumentPage],
     *,
+    chunk_size: int = 512,
+    chunk_overlap: int = 64,
     strategy_version: str = "title@1",
 ) -> list[KnowledgeChunk]:
     """按 Markdown 标题层级切分。无标题结构时回退 fixed_size。"""
@@ -145,5 +149,70 @@ async def process_title_chunk(
         document_id,
         document_version_id,
         pages,
-        strategy_version="fixed_size@1",
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        strategy_version=strategy_version,
+    )
+
+
+async def process_chunks(
+    session: AsyncSession,
+    knowledge_base_version_id: int,
+    course_id: int,
+    document_id: int,
+    document_version_id: int,
+    pages: list[DocumentPage],
+    *,
+    strategy_code: str | None = None,
+) -> list[KnowledgeChunk]:
+    """按配置选择 chunk 策略；无配置时回退 title@1。"""
+    from app.repositories.config_repo import ChunkStrategyRepo
+
+    repo = ChunkStrategyRepo(session)
+    strategies = await repo.get_enabled()
+
+    chosen = None
+    if strategy_code:
+        chosen = next(
+            (strategy for strategy in strategies if strategy.strategy_code == strategy_code),
+            None,
+        )
+    elif strategies:
+        chosen = strategies[0]
+
+    if chosen is None:
+        return await process_title_chunk(
+            session,
+            knowledge_base_version_id,
+            course_id,
+            document_id,
+            document_version_id,
+            pages,
+            strategy_version="title@1",
+        )
+
+    chunk_size = chosen.chunk_size if chosen.chunk_size is not None else 512
+    chunk_overlap = chosen.chunk_overlap if chosen.chunk_overlap is not None else 64
+
+    if chosen.chunk_method == "title":
+        impl = process_title_chunk
+    elif chosen.chunk_method == "fixed_size":
+        impl = process_fixed_size_chunk
+    elif chosen.chunk_method == "semantic":
+        from app.services.chunking.semantic import process_semantic_chunk
+
+        impl = process_semantic_chunk
+    else:
+        raise ValueError(f"unknown chunk_method: {chosen.chunk_method}")
+
+    return await impl(
+        session,
+        knowledge_base_version_id,
+        course_id,
+        document_id,
+        document_version_id,
+        pages,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        strategy_version=chosen.strategy_version,
     )

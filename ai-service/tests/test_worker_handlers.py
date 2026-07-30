@@ -7,7 +7,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document_task import DocumentParseTask
-from app.models.kb import DocumentPage, KbBuildTask, KnowledgeChunk
+from app.models.kb import (
+    DocumentPage,
+    EmbeddingIndexVersion,
+    KbBuildTask,
+    KeywordIndexVersion,
+    KnowledgeChunk,
+)
 
 
 class FakeSession:
@@ -186,7 +192,8 @@ async def test_build_chunk_task_creates_chunks_from_pages(monkeypatch) -> None:
     from app.workers import handlers
 
     saved_chunks: list[KnowledgeChunk] = []
-    deleted_versions: list[int] = []
+    deleted_document_versions: list[tuple[int, int]] = []
+    process_calls: list[dict] = []
 
     class FakeTaskRepo:
         def __init__(self, session) -> None:  # noqa: ANN001
@@ -222,26 +229,53 @@ async def test_build_chunk_task_creates_chunks_from_pages(monkeypatch) -> None:
         def __init__(self, session) -> None:  # noqa: ANN001
             pass
 
-        async def delete_by_version(self, knowledge_base_version_id: int) -> int:
-            deleted_versions.append(knowledge_base_version_id)
+        async def delete_by_document_version(
+            self, knowledge_base_version_id: int, document_version_id: int
+        ) -> int:
+            deleted_document_versions.append(
+                (knowledge_base_version_id, document_version_id)
+            )
             return 0
 
         async def add_all(self, chunks: list[KnowledgeChunk]) -> list[KnowledgeChunk]:
             saved_chunks.extend(chunks)
             return chunks
 
+    async def fake_process_chunks(session, **kwargs) -> list[KnowledgeChunk]:  # noqa: ANN001, ANN003
+        process_calls.append(kwargs)
+        return [
+            KnowledgeChunk(
+                knowledge_base_version_id=kwargs["knowledge_base_version_id"],
+                course_id=kwargs["course_id"],
+                document_id=kwargs["document_id"],
+                document_version_id=kwargs["document_version_id"],
+                chunk_text="hello",
+                page_start=1,
+                page_end=1,
+                chunk_hash="hash",
+                chunk_strategy_version="fixed@small",
+            )
+        ]
+
     monkeypatch.setattr(handlers, "KbBuildTaskRepo", FakeTaskRepo)
     monkeypatch.setattr(handlers, "DocumentPageRepo", FakeDocumentPageRepo)
     monkeypatch.setattr(handlers, "KnowledgeChunkRepo", FakeKnowledgeChunkRepo)
+    monkeypatch.setattr(handlers, "process_chunks", fake_process_chunks)
 
     await handlers.build_chunk_task(
         task_id=10,
         task_type="build_chunk",
-        payload={"course_id": 2, "document_id": 10, "document_version_id": 20},
+        payload={
+            "course_id": 2,
+            "document_id": 10,
+            "document_version_id": 20,
+            "chunk_strategy_code": "fixed",
+        },
         session=cast(AsyncSession, FakeSession()),
     )
 
-    assert deleted_versions == [5]
+    assert deleted_document_versions == [(5, 20)]
+    assert process_calls[0]["strategy_code"] == "fixed"
     assert len(saved_chunks) == 1
     assert saved_chunks[0].knowledge_base_version_id == 5
     assert saved_chunks[0].course_id == 2
@@ -345,3 +379,176 @@ async def test_dispatch_uses_concrete_handler(monkeypatch) -> None:
     await dispatch(12, "structure_knowledge", {}, cast(AsyncSession, FakeSession()))
 
     assert progress == [("structure_skipped", 100)]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_kb_version_artifacts_removes_indexes_and_chunks(
+    monkeypatch,
+) -> None:
+    from app.workers import handlers
+
+    deleted_rows: list[object] = []
+    deleted_versions: list[int] = []
+
+    class FakeResult:
+        def __init__(self, rows: list[object]) -> None:
+            self.rows = rows
+
+        def scalars(self):  # noqa: ANN201
+            return self
+
+        def all(self) -> list[object]:
+            return self.rows
+
+    class CleanupSession(FakeSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self.results = [
+                FakeResult(
+                    [
+                        EmbeddingIndexVersion(
+                            id=1,
+                            knowledge_base_version_id=5,
+                            embedding_model="m",
+                            embedding_model_version="v",
+                            embedding_dim=3,
+                            vector_store="pgvector",
+                            status="building",
+                        )
+                    ]
+                ),
+                FakeResult(
+                    [
+                        KeywordIndexVersion(
+                            id=2,
+                            knowledge_base_version_id=5,
+                            index_engine="pg_fts",
+                            status="ready",
+                        )
+                    ]
+                ),
+            ]
+
+        async def execute(self, stmt, params=None):  # noqa: ANN001
+            self.executed.append((stmt, params))
+            return self.results.pop(0)
+
+        async def delete(self, row: object) -> None:
+            deleted_rows.append(row)
+
+    class FakeKnowledgeChunkRepo:
+        def __init__(self, session) -> None:  # noqa: ANN001
+            pass
+
+        async def delete_by_version(self, knowledge_base_version_id: int) -> int:
+            deleted_versions.append(knowledge_base_version_id)
+            return 3
+
+    monkeypatch.setattr(handlers, "KnowledgeChunkRepo", FakeKnowledgeChunkRepo)
+
+    await handlers._cleanup_kb_version_artifacts(
+        cast(AsyncSession, CleanupSession()), knowledge_base_version_id=5
+    )
+
+    assert [type(row) for row in deleted_rows] == [
+        EmbeddingIndexVersion,
+        KeywordIndexVersion,
+    ]
+    assert deleted_versions == [5]
+
+
+@pytest.mark.asyncio
+async def test_build_kb_version_cleans_up_on_index_failure(monkeypatch) -> None:
+    from app.workers import handlers
+
+    cleanup_versions: list[int] = []
+
+    class DocumentResult:
+        def mappings(self):  # noqa: ANN201
+            return self
+
+        def all(self) -> list[dict]:
+            return [{"course_id": 2, "document_id": 10, "document_version_id": 20}]
+
+    class BuildSession(FakeSession):
+        async def execute(self, stmt, params=None):  # noqa: ANN001
+            self.executed.append((stmt, params))
+            return DocumentResult()
+
+    class FakeTaskRepo:
+        def __init__(self, session) -> None:  # noqa: ANN001
+            pass
+
+        async def get(self, task_id: int) -> KbBuildTask:
+            return KbBuildTask(
+                id=task_id,
+                knowledge_base_version_id=5,
+                task_type="build_knowledge_base_version",
+                status="running",
+                created_at=datetime.now(UTC),
+            )
+
+        async def update_progress(self, task: KbBuildTask, step: str, progress_value: int) -> None:
+            return None
+
+    class FakeDocumentPageRepo:
+        def __init__(self, session) -> None:  # noqa: ANN001
+            pass
+
+        async def list_by_version(self, document_version_id: int) -> list[DocumentPage]:
+            return [
+                DocumentPage(
+                    document_id=10,
+                    document_version_id=document_version_id,
+                    page_number=1,
+                    text="# A\n\nhello",
+                )
+            ]
+
+    class FakeKnowledgeChunkRepo:
+        def __init__(self, session) -> None:  # noqa: ANN001
+            pass
+
+        async def delete_by_version(self, knowledge_base_version_id: int) -> int:
+            return 0
+
+        async def add_all(self, chunks: list[KnowledgeChunk]) -> list[KnowledgeChunk]:
+            return chunks
+
+    async def fake_process_chunks(session, **kwargs) -> list[KnowledgeChunk]:  # noqa: ANN001, ANN003
+        return [
+            KnowledgeChunk(
+                knowledge_base_version_id=kwargs["knowledge_base_version_id"],
+                course_id=kwargs["course_id"],
+                document_id=kwargs["document_id"],
+                document_version_id=kwargs["document_version_id"],
+                chunk_text="hello",
+                page_start=1,
+                page_end=1,
+                chunk_hash="hash",
+                chunk_strategy_version="title@1",
+            )
+        ]
+
+    async def fail_keyword(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        raise RuntimeError("keyword index failed")
+
+    async def fake_cleanup(session, knowledge_base_version_id: int) -> None:  # noqa: ANN001
+        cleanup_versions.append(knowledge_base_version_id)
+
+    monkeypatch.setattr(handlers, "KbBuildTaskRepo", FakeTaskRepo)
+    monkeypatch.setattr(handlers, "DocumentPageRepo", FakeDocumentPageRepo)
+    monkeypatch.setattr(handlers, "KnowledgeChunkRepo", FakeKnowledgeChunkRepo)
+    monkeypatch.setattr(handlers, "process_chunks", fake_process_chunks)
+    monkeypatch.setattr(handlers, "build_keyword_index_task", fail_keyword)
+    monkeypatch.setattr(handlers, "_cleanup_kb_version_artifacts", fake_cleanup)
+
+    with pytest.raises(RuntimeError, match="keyword index failed"):
+        await handlers.build_knowledge_base_version_task(
+            task_id=99,
+            task_type="build_knowledge_base_version",
+            payload={},
+            session=cast(AsyncSession, BuildSession()),
+        )
+
+    assert cleanup_versions == [5]

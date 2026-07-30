@@ -20,3 +20,11 @@ async def test_live(client: AsyncClient) -> None:
     resp = await client.get("/health/live")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_metrics(client: AsyncClient) -> None:
+    resp = await client.get("/metrics")
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]
+    assert "kb_build_tasks_total" in resp.text

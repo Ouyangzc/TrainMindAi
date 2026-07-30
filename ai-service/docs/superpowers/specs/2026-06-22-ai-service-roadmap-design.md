@@ -20,7 +20,7 @@
 | Chunk 策略 (title / fixed_size) | ⚠️ MVP |
 | 混合检索 (pgvector + PG FTS) | ⚠️ MVP |
 | RAG 问答 (同步) | ⚠️ MVP |
-| Worker 管道 (parse→chunk→keyword→embedding) | ⚠️ MVP；parse 已支持 MinIO + Markdown fallback |
+| Worker 管道 (document_parse_task + kb_build_task) | ⚠️ MVP；解析任务已独立，KB 构建链路仍待 Phase 2 健壮化 |
 | 关键词索引 (jieba + PG FTS tsvector) | ⚠️ MVP |
 | SSE 流式问答 | ❌ 占位 |
 | PDF/PPTX/DOCX/XLSX 解析 | ✅ Phase 1 完成 |
@@ -207,13 +207,32 @@ Phase 1 不能只实现解析器和 Worker handler，必须同时打通 Java 业
 
 Worker 管道补充并发控制、增量更新、任务重试、进度可观测性和 chunk 策略配置化。
 
+### 当前实现基线（2026-07-30）
+
+Phase 1 后，资料解析任务已经从 `ai.kb_build_task` 拆出，落在 Java 业务库
+`public.document_parse_task`：
+
+- `POST /internal/v1/documents/{document_version_id}/parse` 创建
+  `public.document_parse_task`，Worker 负责下载/解析并写入 `ai.document_page`。
+- `ai.kb_build_task` 只负责知识库构建任务：
+  `build_chunk`、`build_keyword_index`、`build_embedding_index`、
+  `build_knowledge_base_version`、`rebuild_knowledge_base_version`。
+- 当前整版本构建 handler 内部串行执行 chunk → keyword → embedding；Phase 2 的
+  并发控制重点是避免相同 `knowledge_base_version_id + task_type` 的构建任务并发运行。
+
+因此 Phase 2 的主要边界是 `ai.kb_build_task` 知识库构建链路；解析任务可复用部分
+重试/可观测设计，但不再假设 parse 是 `kb_build_task` 子任务。
+
 ### 任务清单
 
 #### 2.1 Chunk 策略配置化
 
 - 修改 `chunking/__init__.py` 入口，从 `ChunkStrategyRepo` 读取 `strategy_code + strategy_version`
-- 按 `knowledge_base_version_id` 选择对应策略（或使用默认策略）
+- 当前 `ai.chunk_strategy` 表没有 `knowledge_base_version_id` 绑定字段；Phase 2 MVP
+  通过 `kb_build_task.payload_json.chunk_strategy_code` 显式选择策略，未传时使用默认启用策略，
+  无启用策略时回退 `title@1`
 - 支持 `chunk_method`: `title`, `fixed_size`, `semantic`
+- `build_chunk` 和 `build_knowledge_base_version` 都必须走同一个策略调度入口
 
 **验收标准**: 不同策略配置产生不同 chunk；配置变更后重新构建即生效
 
@@ -221,55 +240,64 @@ Worker 管道补充并发控制、增量更新、任务重试、进度可观测�
 
 - 新建 `chunking/semantic.py`（或在 `__init__.py` 中扩充）
 - 基于 Markdown 段落/列表/代码块边界切分
-- 段落超过 `chunk_size` 时，在最近的自然段落边界截断
+- 段落超过 `chunk_size` 时，优先在中文/英文句末标点等自然边界截断
 - 回退: 无结构文本 → 自动降级为 fixed_size
 
 **验收标准**: 5 段落输入 → 产出 ≥5 个 chunk（段落边界优先）；不会在句子中间截断
 
-#### 2.3 Worker 并发控制
-
-- 同一 `kb_build_task` 的子任务链 (parse→chunk→keyword→embedding) 保持串行（当前已是）
-- 不同知识库版本的任务可并行执行
-- 使用 Redis `SETNX` 实现 `task_type` 级别互斥锁（如 `lock:build_chunk:{kb_version_id}`），TTL=300s
-- 获取锁失败的任务保持 pending，下次轮询再试（不跳过）
-- Redis 不可用时降级为无锁模式（允许重复调度，由幂等性保障安全）
-
-**验收标准**: 同时插入 2 个 build_chunk 任务 → 1 个 running，1 个保持 pending
-
-#### 2.4 任务失败重试
-
-- Worker 捕获 `HANDLER_ERROR` 后检查 `task.retry_count < 3`：
-  - 第 1 次失败 → retry_count=1，将 task_id 写入 Redis ZSET（key=`retry:tasks`，score=now+5s）
-  - 第 2 次失败 → retry_count=2，score=now+30s
-  - 第 3 次失败 → retry_count=3，标记 `failed`
-- Worker 每次轮询先检查 Redis ZSET 取出到期的 task_id，恢复 status=pending 供抢占
-- 非可重试错误 (NOT_IMPLEMENTED / PARSE_UNSUPPORTED) → 直接 failed，不重试
-
-**验收标准**: 解析异常自动重试 3 次 → 最终标记 failed；第 2 次成功 → 任务正常完成
-
-#### 2.5 知识库版本建索引事务化
-
-- `build_knowledge_base_version` 任务链如果中途失败，自动清理已创建的中间记录：
-  - 删除已写入的 `embedding_index_version`
-  - 删除已写入的 `keyword_index_version`
-  - 删除已写入的 `chunk_embedding`
-- 清理使用独立 session 执行，避免与主事务冲突
-
-**验收标准**: embedding 步骤失败 → 自动清理该版本 keyword_index 和 embedding_index 记录
-
-#### 2.6 增量更新（按知识库版本快照）
+#### 2.3 增量更新（按知识库版本快照）
 
 - 增量更新不在当前线上 `knowledge_base_version` 内原地修改 chunk。
 - Java 侧为本次更新创建新的 `knowledge_base_version`，AI 服务只负责在新版本内解析新文档、构建 chunk、构建 keyword/embedding index。
 - 当前 published 版本继续服务；新版本构建完成并通过验收后，由 Java 侧切换 `current_version_id`。
 - 如果要复用未变更文档的 chunk，可在新版本构建阶段复制旧版本 chunk 并重建索引，但复制行为必须绑定新 `knowledge_base_version_id`。
 - 旧版本 chunk 不做 `status=expired` 原地修改，避免破坏历史检索日志、评估结果和回滚能力。
+- 单文档 `build_chunk` 只能删除当前 `knowledge_base_version_id + document_version_id`
+  范围内的 chunk，不能删除整个知识库版本的 chunk；整版本构建才允许先清理整个新版本。
 
-**验收标准**: 更新文档 A → 生成新的 knowledge_base_version；旧 published 版本仍可检索；新版本验证通过后可由 Java 侧发布切换；回滚时仍可回到旧版本
+**验收标准**: 更新文档 A → 生成新的 knowledge_base_version；旧 published 版本仍可检索；新版本验证通过后可由 Java 侧发布切换；回滚时仍可回到旧版本；单文档构建不误删同版本其他文档 chunk
+
+#### 2.4 Worker 并发控制
+
+- 同一 `kb_build_task` 的 chunk→keyword→embedding 子任务链保持串行（当前整版本构建 handler 已是）
+- 不同知识库版本的任务可并行执行
+- 使用 Redis `SETNX` 实现 `task_type` 级别互斥锁（如 `lock:build_chunk:{kb_version_id}`），TTL=300s
+- 获取锁失败的任务恢复 pending，下次轮询再试；不得将其记录为最终失败
+- Redis 不可用时降级为无锁模式（允许重复调度，由幂等性保障安全）
+
+**验收标准**: 同时插入 2 个 build_chunk 任务 → 1 个 running，1 个保持 pending
+
+#### 2.5 任务失败重试
+
+- Worker 捕获 `HANDLER_ERROR` 后检查 `task.retry_count < 3`；重试范围先覆盖 `ai.kb_build_task`
+  构建任务
+  - 第 1 次失败 → retry_count=1，将 task_id 写入 Redis ZSET（key=`retry:tasks`，score=now+5s）
+  - 第 2 次失败 → retry_count=2，score=now+30s
+  - 第 3 次失败 → retry_count=3，标记 `failed`
+- Worker 每次轮询先检查 Redis ZSET 取出到期的 task_id，恢复 status=pending 供抢占
+- 非可重试错误 (NOT_IMPLEMENTED / PARSE_UNSUPPORTED 等 AppError) → 直接 failed，不重试
+- 如果不新增 `retrying` 状态，则 `failed + retry_count < 3 + Redis ZSET存在` 表示等待自动重试；
+  API 和 metrics 必须避免把它等同最终失败
+
+**验收标准**: 构建任务 transient 异常自动重试 3 次 → 最终标记 failed；第 2 次成功 → 任务正常完成
+
+#### 2.6 知识库版本建索引事务化
+
+- `build_knowledge_base_version` 任务链如果中途失败，自动清理已创建的中间记录：
+  - 删除本次写入的 `knowledge_chunk`（或清理整个未发布的新版本 chunk）
+  - 删除已写入的 `embedding_index_version`
+  - 删除已写入的 `keyword_index_version`
+  - 删除已写入的 `chunk_embedding`
+- 清理使用独立 session 执行，避免与主事务冲突
+
+**验收标准**: embedding 步骤失败 → 自动清理该版本本次生成的 chunk、keyword_index、embedding_index 和 chunk_embedding 记录
 
 #### 2.7 管道进度可观测性
 
 - Worker 在每步关键节点上报 `current_step` 和 `progress`
+- AI service 提供后端观测接口和运维指标；RuoYi 管理端页面展示不在本仓库代码范围内，
+  但应通过 `GET /internal/v1/kb-tasks/{id}`、`GET /internal/v1/kb-tasks` 接入进度、
+  状态、失败原因和重试入口
 - 在 `pyproject.toml` 添加依赖 `prometheus-client>=0.21`；新增 `app/core/metrics.py` 定义指标：
   - `kb_build_tasks_total{status}` — 任务总数
   - `kb_build_tasks_running` — 运行中
@@ -277,7 +305,7 @@ Worker 管道补充并发控制、增量更新、任务重试、进度可观测�
   - `kb_build_tasks_failed_total{error_code}` — 按错误码分类
 - 在 FastAPI 挂载 `/metrics` 端点
 
-**验收标准**: `GET /internal/v1/kb-tasks/{id}` 返回准确进度；`/metrics` 包含上述指标
+**验收标准**: `GET /internal/v1/kb-tasks/{id}` 返回准确进度；根路径 `/metrics` 包含上述指标且不依赖 internal token；文档明确页面展示由 Java/RuoYi 管理端后续接入
 
 #### 2.8 管道 API 增强
 
@@ -291,6 +319,7 @@ Worker 管道补充并发控制、增量更新、任务重试、进度可观测�
 - Worker 并发测试（Mock Redis + 同时插入 N 个任务）
 - 重试逻辑测试（3 次覆盖）
 - 新 knowledge_base_version 快照构建与回滚边界验证
+- 单文档 chunk 构建不误删同版本其他文档
 - 管道原子性测试（模拟中间失败）
 - Chunk 策略配置化测试
 

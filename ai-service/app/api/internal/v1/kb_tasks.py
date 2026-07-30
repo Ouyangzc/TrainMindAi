@@ -4,9 +4,55 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.models.kb import KbBuildTask
 from app.repositories.task_repo import KbBuildTaskRepo
+from app.schemas.common import Page
 
 router = APIRouter(prefix="/kb-tasks", tags=["kb-tasks"])
+
+
+@router.get("")
+async def list_tasks(
+    kb_version_id: int | None = None,
+    page: int = 1,
+    size: int = 20,
+    session: AsyncSession = Depends(get_session),
+) -> Page[dict]:
+    """批量查询构建任务，支持按知识库版本过滤。"""
+    filters = []
+    if kb_version_id is not None:
+        filters.append(KbBuildTask.knowledge_base_version_id == kb_version_id)
+
+    repo = KbBuildTaskRepo(session)
+    total = await repo.count(*filters)
+    tasks = await repo.find(
+        *filters,
+        order_by=KbBuildTask.created_at.desc(),
+        limit=size,
+        offset=(page - 1) * size,
+    )
+
+    return Page(
+        items=[
+            {
+                "task_id": task.id,
+                "task_type": task.task_type,
+                "status": task.status,
+                "current_step": task.current_step,
+                "progress": task.progress,
+                "created_at": task.created_at.isoformat()
+                if task.created_at
+                else None,
+                "finished_at": task.finished_at.isoformat()
+                if task.finished_at
+                else None,
+            }
+            for task in tasks
+        ],
+        total=total,
+        page=page,
+        page_size=size,
+    )
 
 
 @router.get("/{task_id}")

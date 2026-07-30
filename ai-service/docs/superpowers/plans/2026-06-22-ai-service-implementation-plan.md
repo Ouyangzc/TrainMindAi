@@ -1228,12 +1228,30 @@ Expected: coverage ≥ 80%
 
 # Phase 2: Pipeline Hardening
 
+> **Status:** Revised on 2026-07-30 to match the current codebase after Phase 1.
+>
+> **Current baseline:**
+> - Document parsing is now handled by `public.document_parse_task`, not by `ai.kb_build_task`.
+> - `ai.kb_build_task` covers KB build tasks only: chunk, keyword index, embedding index, full version build, and rebuild.
+> - `build_knowledge_base_version_task` already runs chunk → keyword → embedding serially inside one handler.
+> - Phase 2 hardening therefore focuses on `ai.kb_build_task`; parse-task retry/observability can reuse patterns later, but is not the main Phase 2 contract.
+> - `ai.chunk_strategy` has no `knowledge_base_version_id` binding column. Phase 2 MVP uses `kb_build_task.payload_json.chunk_strategy_code` for explicit selection and falls back to an enabled/default strategy.
+
 ## Task 2.1: Chunk strategy configuration
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_chunking.py tests/test_worker_handlers.py::test_build_chunk_task_creates_chunks_from_pages -v` → 5 passed
+> - `.venv/bin/pytest tests/test_worker_handlers.py -v` → 5 passed
+> - `.venv/bin/pytest` → 35 passed, 1 warning
 
 **Files:**
 - Modify: `app/services/chunking/__init__.py`
+- Modify: `app/workers/handlers.py`
+- Test: `tests/test_chunking.py`, `tests/test_worker_handlers.py`
 
-- [ ] **Step 1: Write test**
+- [x] **Step 1: Write test**
 
 Add to new test file `tests/test_chunking.py`:
 ```python
@@ -1265,7 +1283,13 @@ async def test_get_chunk_strategy_from_repo(mock_session):
     assert strategies[0].chunk_method == "title"
 ```
 
-- [ ] **Step 2: Modify chunking entry point**
+Also add behavior tests proving:
+- `process_chunks(..., strategy_code="fixed")` uses the matching enabled strategy.
+- No enabled strategy falls back to `title@1`.
+- Unknown `chunk_method` raises a clear `ValueError`.
+- `build_chunk_task` passes `payload["chunk_strategy_code"]` to `process_chunks`.
+
+- [x] **Step 2: Modify chunking entry point**
 
 Update `app/services/chunking/__init__.py` to add a strategy-aware dispatch function:
 
@@ -1277,19 +1301,20 @@ async def process_chunks(
     document_id: int,
     document_version_id: int,
     pages: list[DocumentPage],
+    *,
     strategy_code: str | None = None,
 ) -> list[KnowledgeChunk]:
     """Strategy-aware chunk dispatch.
 
     Reads the active strategy from ai.chunk_strategy table.
-    Falls back to title@1 when no strategy is configured.
+    Falls back to an enabled strategy, then title@1 when no strategy is configured.
     """
     from app.repositories.config_repo import ChunkStrategyRepo
 
     repo = ChunkStrategyRepo(session)
     strategies = await repo.get_enabled()
 
-    # Filter by code, or take first enabled
+    # Filter by code from kb_build_task.payload_json, or take the first enabled strategy.
     chosen = None
     if strategy_code:
         chosen = next((s for s in strategies if s.strategy_code == strategy_code), None)
@@ -1322,30 +1347,31 @@ async def process_chunks(
     )
 ```
 
-- [ ] **Step 3: Update build_chunk_task to use process_chunks**
+- [x] **Step 3: Update KB build handlers to use process_chunks**
 
-In `app/workers/handlers.py`, replace the line calling `process_title_chunk`:
+In `app/workers/handlers.py`, replace direct `process_title_chunk` calls in both
+`build_chunk_task` and `build_knowledge_base_version_task`:
 
 ```python
 from app.services.chunking import process_chunks
 
-# Inside build_chunk_task, replace:
-#   chunks = await process_title_chunk(...)
-# with:
-    chunks = await process_chunks(
-        session,
-        knowledge_base_version_id=kb_version_id,
-        course_id=course_id,
-        document_id=document_id,
-        document_version_id=document_version_id,
-        pages=pages,
-    )
+strategy_code = payload.get("chunk_strategy_code")
+chunks = await process_chunks(
+    session,
+    knowledge_base_version_id=kb_version_id,
+    course_id=course_id,
+    document_id=document_id,
+    document_version_id=document_version_id,
+    pages=pages,
+    strategy_code=str(strategy_code) if strategy_code else None,
+)
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 uv run pytest tests/test_chunking.py -v
+uv run pytest tests/test_worker_handlers.py::test_build_chunk_task_creates_chunks_from_pages -v
 ```
 Expected: PASS
 
@@ -1353,11 +1379,19 @@ Expected: PASS
 
 ## Task 2.2: Implement semantic chunk strategy
 
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_chunking.py -v` → 7 passed
+> - `.venv/bin/pytest` → 38 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 68 source files
+
 **Files:**
 - Create: `app/services/chunking/semantic.py`
 - Test: `tests/test_chunking.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 from app.services.chunking.semantic import process_semantic_chunk
@@ -1387,7 +1421,38 @@ async def test_semantic_chunk_splits_at_paragraphs(mock_session):
     assert "第二段" in chunks[1].chunk_text
 ```
 
-- [ ] **Step 2: Implement semantic chunking**
+Add an additional test for overlong paragraphs:
+
+```python
+@pytest.mark.asyncio
+async def test_semantic_chunk_prefers_sentence_boundary(mock_session):
+    """超长段落应优先在句末边界切分。"""
+    from app.models.kb import DocumentPage
+
+    pages = [
+        DocumentPage(
+            document_id=1,
+            document_version_id=1,
+            page_number=1,
+            text="第一句很长但是完整。第二句也应该完整。第三句用于溢出。",
+        )
+    ]
+
+    chunks = await process_semantic_chunk(
+        mock_session,
+        knowledge_base_version_id=1,
+        course_id=1,
+        document_id=1,
+        document_version_id=1,
+        pages=pages,
+        chunk_size=18,
+        chunk_overlap=0,
+    )
+
+    assert chunks[0].chunk_text.endswith("。")
+```
+
+- [x] **Step 2: Implement semantic chunking**
 
 `app/services/chunking/semantic.py`:
 ```python
@@ -1426,7 +1491,8 @@ async def process_semantic_chunk(
     if not full_text.strip():
         return chunks
 
-    # Split on blank-line paragraphs first
+    # Split on blank-line paragraphs first; for overlong paragraphs, split on sentence
+    # boundaries such as 。！？；.?!; before falling back to fixed-size slicing.
     paragraphs = re.split(r"\n\n+", full_text)
 
     current_chunk_lines: list[str] = []
@@ -1466,7 +1532,7 @@ async def process_semantic_chunk(
         current_chunk_lines.append(para)
         current_text = "\n\n".join(current_chunk_lines)
 
-        # If accumulated text exceeds chunk_size, flush
+        # If accumulated text exceeds chunk_size, flush on paragraph/sentence boundary.
         if len(current_text) > chunk_size:
             # Remove last paragraph and flush the rest
             current_chunk_lines.pop()
@@ -1491,23 +1557,93 @@ async def process_semantic_chunk(
     return chunks
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 uv run pytest tests/test_chunking.py::test_semantic_chunk_splits_at_paragraphs -v
+uv run pytest tests/test_chunking.py::test_semantic_chunk_prefers_sentence_boundary -v
 ```
 Expected: PASS
 
 ---
 
-## Task 2.3: Worker concurrency control
+## Task 2.3: Snapshot-based document update
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_worker_handlers.py tests/test_repositories.py -v` → 11 passed
+> - `.venv/bin/pytest` → 39 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 68 source files
+
+**Files:**
+- Modify: `app/repositories/doc_repo.py`
+- Modify: `app/workers/handlers.py`
+- Test: `tests/test_worker_handlers.py`
+
+This task updates the implementation boundary to match the current codebase. Phase 1
+parsing writes `ai.document_page`; Java creates or chooses a new `knowledge_base_version_id`
+for updated materials. AI service must build chunks and indexes under the new version only.
+
+- [x] **Step 1: Add document-scoped chunk deletion**
+
+Add a repository method:
+
+```python
+async def delete_by_document_version(
+    self,
+    knowledge_base_version_id: int,
+    document_version_id: int,
+) -> int:
+    ...
+```
+
+It must delete only chunks matching both `knowledge_base_version_id` and
+`document_version_id`.
+
+- [x] **Step 2: Update build_chunk_task boundary**
+
+`build_chunk_task` currently calls `delete_by_version(kb_version_id)`. Replace it with
+the document-scoped deletion method so a single-document chunk build cannot delete
+other documents' chunks in the same new version.
+
+Full-version handlers may still clear the whole new version before rebuilding all
+documents.
+
+- [x] **Step 3: Add snapshot boundary tests**
+
+Tests must prove:
+- Building version 2 leaves version 1 chunks untouched.
+- Single-document `build_chunk` for document A does not delete document B chunks in the
+  same `knowledge_base_version_id`.
+- No implementation mutates old chunks with `status="expired"`.
+
+- [x] **Step 4: Verify**
+
+```bash
+uv run pytest tests/test_worker_handlers.py -v
+```
+Expected: PASS
+
+---
+
+## Task 2.4: Worker concurrency control
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_worker_concurrency.py -v` → 4 passed
+> - `.venv/bin/pytest` → 43 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 68 source files
 
 **Files:**
 - Modify: `app/workers/worker.py`
 - Add: Redis-based lock helper in `app/core/redis.py`
 - Test: `tests/test_worker_concurrency.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 `tests/test_worker_concurrency.py`:
 ```python
@@ -1535,7 +1671,7 @@ async def test_acquire_lock_failure():
     assert result is False
 ```
 
-- [ ] **Step 2: Implement lock helper in `app/workers/worker.py`**
+- [x] **Step 2: Implement lock helper in `app/workers/worker.py`**
 
 ```python
 from redis.asyncio import Redis as AsyncRedis
@@ -1554,12 +1690,12 @@ async def release_task_lock(redis: AsyncRedis, task_type: str, kb_version_id: in
     await redis.delete(lock_key)
 ```
 
-- [ ] **Step 3: Integrate lock into worker loop**
+- [x] **Step 3: Integrate lock into the current KB worker loop**
 
-Modify `_claim_and_run_once` in `app/workers/worker.py`:
+Modify `_claim_and_run_kb_once` in `app/workers/worker.py`:
 
 ```python
-async def _claim_and_run_once() -> bool:
+async def _claim_and_run_kb_once() -> bool:
     async with SessionLocal() as session:
         repo = KbBuildTaskRepo(session)
         task = await repo.claim_pending()
@@ -1579,7 +1715,7 @@ async def _claim_and_run_once() -> bool:
             # Another worker holds this lock; release claim
             task.status = "pending"  # Return to pending
             await session.commit()
-            return True  # We did something (found task, couldn't lock)
+            return True  # Found a task but deferred it because the lock is held.
 
         try:
             await dispatch(task.id, task.task_type, task.payload_json or {}, session)
@@ -1602,7 +1738,7 @@ async def _claim_and_run_once() -> bool:
     return True
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 uv run pytest tests/test_worker_concurrency.py -v
@@ -1611,12 +1747,24 @@ Expected: PASS
 
 ---
 
-## Task 2.4: Task failure retry with Redis ZSET
+## Task 2.5: Task failure retry with Redis ZSET
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_worker_concurrency.py tests/test_repositories.py -v` → 14 passed
+> - `.venv/bin/pytest` → 47 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 68 source files
 
 **Files:**
 - Modify: `app/workers/worker.py`, `app/repositories/task_repo.py`
+- Test: `tests/test_worker_concurrency.py` or `tests/test_worker_retry.py`
 
-- [ ] **Step 1: Implement retry queue helpers**
+Scope for Phase 2 is `ai.kb_build_task`. `public.document_parse_task` can adopt the
+same retry pattern later, but is not required for this task.
+
+- [x] **Step 1: Implement retry queue helpers**
 
 In `app/workers/worker.py`:
 ```python
@@ -1639,7 +1787,7 @@ async def pop_due_retries(redis: AsyncRedis) -> list[int]:
     return [int(i) for i in ids]
 ```
 
-- [ ] **Step 2: Update claim logic in repo**
+- [x] **Step 2: Update claim logic in repo**
 
 In `app/repositories/task_repo.py`, modify `claim_pending` to also accept a list of retryable task IDs:
 
@@ -1648,7 +1796,7 @@ async def claim_pending(self, retryable_ids: list[int] | None = None) -> KbBuild
     """Claim a pending task (or a retryable one)."""
     stmt = select(KbBuildTask).where(KbBuildTask.status == "pending").order_by(KbBuildTask.created_at).limit(1)
 
-    # If specific retry IDs are given, prefer those
+    # If specific retry IDs are given, prefer those waiting for automatic retry.
     if retryable_ids:
         stmt = select(KbBuildTask).where(
             KbBuildTask.id.in_(retryable_ids), KbBuildTask.status == "failed"
@@ -1664,9 +1812,9 @@ async def claim_pending(self, retryable_ids: list[int] | None = None) -> KbBuild
     return task
 ```
 
-- [ ] **Step 3: Update worker error handling**
+- [x] **Step 3: Update worker error handling**
 
-In `app/workers/worker.py`, update the exception handler in `_claim_and_run_once`:
+In `app/workers/worker.py`, update the exception handler in `_claim_and_run_kb_once`:
 
 ```python
 except Exception as exc:  # noqa: BLE001
@@ -1675,7 +1823,9 @@ except Exception as exc:  # noqa: BLE001
         from app.core.errors import AppError
         if not isinstance(exc, AppError) or exc.code not in ("PARSE_UNSUPPORTED", "PARSE_ENCRYPTED", "PARSE_CORRUPTED"):
             await schedule_retry(redis_client, task.id, 5 * (4 ** (task.retry_count - 1)))
-            task.status = "failed"  # Mark failed but will be picked up by retry queue
+            # Existing schema has no retrying status. A failed task with retry_count < 3
+            # and an entry in retry:tasks means "waiting for automatic retry".
+            task.status = "failed"
             task.error_code = "HANDLER_ERROR"
             task.error_message = str(exc)[:500]
             log.warning("worker.scheduled_retry", task_id=task.id, attempt=task.retry_count)
@@ -1686,7 +1836,7 @@ except Exception as exc:  # noqa: BLE001
     log.exception("worker.task_failed", task_id=task.id, task_type=task.task_type)
 ```
 
-- [ ] **Step 4: Verify with tests**
+- [x] **Step 4: Verify with tests**
 
 ```bash
 uv run pytest tests/test_worker_concurrency.py -v
@@ -1695,12 +1845,27 @@ Expected: PASS
 
 ---
 
-## Task 2.5: Transactional pipeline rollback
+## Task 2.6: Transactional pipeline rollback
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_worker_handlers.py -v` → 7 passed
+> - `.venv/bin/pytest` → 49 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 68 source files
 
 **Files:**
 - Modify: `app/workers/handlers.py`
+- Modify: `app/repositories/doc_repo.py`
+- Modify: `app/repositories/embedding_repo.py`
+- Test: `tests/test_worker_handlers.py`
 
-- [ ] **Step 1: Implement cleanup in build_knowledge_base_version_task**
+- [x] **Step 1: Implement cleanup in build_knowledge_base_version_task**
+
+The current handler deletes/recreates chunks before keyword and embedding index work.
+Rollback must therefore clean all artifacts produced for the failed version build, not
+only index-version rows.
 
 ```python
 async def build_knowledge_base_version_task(
@@ -1711,43 +1876,45 @@ async def build_knowledge_base_version_task(
 
     created_embedding_idx_id = None
     created_keyword_idx_id = None
+    created_chunk_version_id = None
     try:
-        await build_chunk_task(task_id, "build_chunk", payload, session)
-
-        await build_keyword_index_task(task_id, "build_keyword_index", payload, session)
-        # Capture the keyword index version ID that was just created
+        # Full-version build may clear/recreate chunks under the new version.
+        # Track the version so failure cleanup can remove partial chunks.
         task_repo = KbBuildTaskRepo(session)
         task = await task_repo.get(task_id)
         if task:
-            kw_repo = KeywordIndexVersionRepo(session)
-            kw_idx = await kw_repo.get_latest_by_version(task.knowledge_base_version_id)
-            if kw_idx:
-                created_keyword_idx_id = kw_idx.id
+            created_chunk_version_id = task.knowledge_base_version_id
+
+        ...
+
+        await build_keyword_index_task(task_id, "build_keyword_index", payload, session)
+        # Capture the keyword index version ID that was just created.
+        ...
 
         await build_embedding_index_task(task_id, "build_embedding_index", payload, session)
-        task = await task_repo.get(task_id)
-        if task:
-            emb_repo = EmbeddingIndexVersionRepo(session)
-            emb_idx = await emb_repo.get_latest_by_version(task.knowledge_base_version_id)
-            if emb_idx:
-                created_embedding_idx_id = emb_idx.id
+        # Capture the embedding index version ID that was just created.
+        ...
 
     except Exception:
-        # Cleanup: remove partial artifacts
+        # Cleanup: remove partial artifacts. chunk_embedding is also covered by
+        # ON DELETE CASCADE from knowledge_chunk and embedding_index_version, but tests
+        # should verify cleanup behavior.
         if created_embedding_idx_id:
-            emb_repo = EmbeddingIndexVersionRepo(session)
-            emb = await emb_repo.get(created_embedding_idx_id)
-            if emb:
-                await session.delete(emb)
+            ...
         if created_keyword_idx_id:
-            kw_repo = KeywordIndexVersionRepo(session)
-            kw = await kw_repo.get(created_keyword_idx_id)
-            if kw:
-                await session.delete(kw)
+            ...
+        if created_chunk_version_id:
+            ...
         raise  # Re-raise for worker to handle
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Add rollback tests**
+
+Tests must simulate keyword or embedding failure and verify that the failed
+`knowledge_base_version_id` has no partial chunks, keyword index versions, embedding index
+versions, or chunk embeddings left behind.
+
+- [x] **Step 3: Verify**
 
 ```bash
 uv run pytest tests/test_worker_handlers.py -v
@@ -1756,73 +1923,28 @@ Expected: PASS
 
 ---
 
-## Task 2.6: Snapshot-based document update
-
-**Files:**
-- Modify: `app/api/internal/v1/documents.py`
-- Modify: `app/workers/handlers.py`
-- Test: `tests/test_worker_handlers.py`
-
-This task replaces the old "expire chunks in-place" plan. Do not mutate chunks in the currently published `knowledge_base_version`. The safe boundary is a new version snapshot.
-
-- [ ] **Step 1: Preserve version boundary**
-
-When Java updates one document, Java creates or chooses a new `knowledge_base_version_id` and calls the Phase 1 parse endpoint with that version ID. AI service writes parsed pages and later chunks/indexes against the new version only.
-
-Rules:
-- No `knowledge_base_version_id=0`.
-- No `incremental` flag on `/documents/{document_version_id}/parse`.
-- No `UPDATE ai.knowledge_chunk SET status='expired'` against an existing published version.
-- Current published version continues serving until Java switches the active version after validation.
-
-- [ ] **Step 2: Add snapshot build test**
-
-Create or update a test proving that building with a new version ID writes chunks to the new version and leaves old-version chunks untouched.
-
-```python
-async def test_snapshot_build_does_not_expire_old_version_chunks(...):
-    # Given old version 1 has active chunks
-    # When version 2 is built for an updated document
-    # Then old version 1 chunks remain active
-    # And new version 2 chunks are active under knowledge_base_version_id=2
-```
-
-- [ ] **Step 3: Optional copy optimization**
-
-If copying unchanged chunks from an old version is needed for speed, implement it as a separate helper that creates new `knowledge_chunk` rows under the new `knowledge_base_version_id`. Do not reuse IDs or mutate old rows.
-
-```python
-async def copy_unchanged_chunks_to_new_version(
-    session: AsyncSession,
-    *,
-    from_kb_version_id: int,
-    to_kb_version_id: int,
-    exclude_document_ids: set[int],
-) -> int:
-    ...
-```
-
-- [ ] **Step 4: Verify**
-
-```bash
-uv run pytest tests/test_worker_handlers.py -v
-```
-
-Expected: snapshot boundary tests PASS.
-
----
-
 ## Task 2.7: Pipeline observability / Prometheus metrics
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv sync` → dependency sync complete
+> - `.venv/bin/pytest tests/test_health.py tests/test_worker_concurrency.py -v` → 9 passed
+> - `.venv/bin/pytest` → 50 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 69 source files
 
 **Files:**
 - Create: `app/core/metrics.py`
 - Modify: `app/main.py`, `pyproject.toml`
+- Modify: docs only for RuoYi/admin-page integration notes; no frontend code is changed in
+  `ai-service`
 
-- [ ] **Step 1: Add prometheus-client dependency**
+- [x] **Step 1: Add prometheus-client dependency**
 
 In `pyproject.toml`, add `"prometheus-client>=0.21"` to dependencies.
 
-- [ ] **Step 2: Define metrics**
+- [x] **Step 2: Define metrics**
 
 `app/core/metrics.py`:
 ```python
@@ -1849,9 +1971,10 @@ kb_build_tasks_failed_total = Counter(
 )
 ```
 
-- [ ] **Step 3: Mount /metrics endpoint**
+- [x] **Step 3: Mount root /metrics endpoint**
 
-In `app/main.py`, add:
+In `app/main.py`, add a root `/metrics` endpoint outside `internal_router` so Prometheus
+does not need `X-Internal-Token`:
 ```python
 from fastapi import APIRouter
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -1866,14 +1989,14 @@ async def metrics():
 app.include_router(metrics_router)
 ```
 
-- [ ] **Step 4: Instrument worker**
+- [x] **Step 4: Instrument the current KB worker path**
 
 In `app/workers/worker.py`, add instrumentation calls:
 ```python
 from app.core.metrics import kb_build_tasks_total, kb_build_tasks_running, kb_build_task_duration_seconds, kb_build_tasks_failed_total
 import time
 
-# In _claim_and_run_once, at start:
+# In _claim_and_run_kb_once, after a KB task is claimed:
 start_time = time.monotonic()
 kb_build_tasks_running.inc()
 kb_build_tasks_total.labels(status=task.status).inc()
@@ -1886,7 +2009,20 @@ if task.status == "failed":
     kb_build_tasks_failed_total.labels(error_code=task.error_code or "UNKNOWN").inc()
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Document admin-page integration boundary**
+
+Add/keep notes that AI service exposes backend observability only:
+- `GET /internal/v1/kb-tasks/{id}` for a single task's status, `current_step`,
+  `progress`, `error_code`, and `error_message`.
+- `GET /internal/v1/kb-tasks` for a KB-version task list suitable for management-page
+  polling.
+- Root `/metrics` for Prometheus/ops monitoring, not for the product page.
+
+RuoYi/Java and the management frontend should consume those APIs to render progress bars,
+task history, failure reasons, and retry controls. That UI work is a companion task outside
+the `ai-service` repository unless this repo later gains frontend code.
+
+- [x] **Step 6: Verify**
 
 ```bash
 uv run pytest -v
@@ -1897,12 +2033,23 @@ Expected: no regressions
 
 ## Task 2.8: Batch task query API
 
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_kb_tasks_api.py -v` → 1 passed
+> - `.venv/bin/pytest` → 51 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 69 source files
+
 **Files:**
 - Modify: `app/api/internal/v1/kb_tasks.py`
+- Test: `tests/test_kb_tasks_api.py` or existing API test file
 
-- [ ] **Step 1: Add batch query endpoint**
+- [x] **Step 1: Add batch query endpoint**
 
-In `app/api/internal/v1/kb_tasks.py`:
+In `app/api/internal/v1/kb_tasks.py`, add `@router.get("")` before
+`@router.get("/{task_id}")` so the static list route is not shadowed by the dynamic
+task-id route:
 ```python
 from app.schemas.common import Page
 
@@ -1915,7 +2062,7 @@ async def list_tasks(
     session: AsyncSession = Depends(get_session),
 ) -> Page[dict]:
     """List KB build tasks with optional kb_version_id filter."""
-    from sqlalchemy import func, select as sa_select
+from sqlalchemy import select as sa_select
 
     filters = []
     if kb_version_id is not None:
@@ -1950,7 +2097,7 @@ async def list_tasks(
     return Page(items=items, total=total, page=page, page_size=size)
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 uv run pytest -v
@@ -1961,7 +2108,22 @@ Expected: no regressions
 
 ## Task 2.9: Run Phase 2 test suite
 
-- [ ] **Step 1: Run all tests**
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `.venv/bin/pytest tests/test_chunking.py tests/test_worker_handlers.py tests/test_worker_concurrency.py tests/test_kb_tasks_api.py -v --tb=short` → 22 passed
+> - `.venv/bin/pytest tests/ -v --tb=short` → 51 passed, 1 warning
+> - `.venv/bin/ruff check .` → All checks passed
+> - `.venv/bin/mypy app` → Success, no issues in 69 source files
+
+- [x] **Step 1: Run focused Phase 2 tests**
+
+```bash
+uv run pytest tests/test_chunking.py tests/test_worker_handlers.py tests/test_worker_concurrency.py -v --tb=short
+```
+Expected: all PASS
+
+- [x] **Step 2: Run all tests**
 
 ```bash
 uv run pytest tests/ -v --tb=short
@@ -3725,8 +3887,10 @@ Expected: all 50+ tests PASS, coverage ≥ 80%
 | 11 | 1.10 Phase 1 tests | 1.0-1.9 |
 | 12 | 2.1 Chunk config | — |
 | 13 | 2.2 Semantic chunk | — |
-| 14 | 2.3 Concurrency | — |
-| 15-17 | 2.4-2.6 Worker enhancements | 2.3 |
+| 14 | 2.3 Snapshot boundary | — |
+| 15 | 2.4 Concurrency | 2.3 |
+| 16 | 2.5 Retry | 2.4 |
+| 17 | 2.6 Rollback | 2.3 |
 | 18 | 2.7 Metrics | — |
 | 19 | 2.8 Batch API | — |
 | 20 | 2.9 Phase 2 tests | 2.1-2.8 |

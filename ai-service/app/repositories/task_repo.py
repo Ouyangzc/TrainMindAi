@@ -12,8 +12,15 @@ class KbBuildTaskRepo(BaseRepository[KbBuildTask]):
     def __init__(self, session):  # noqa: ANN001
         super().__init__(session, KbBuildTask)
 
-    async def claim_pending(self) -> KbBuildTask | None:
-        """抢占一个 pending 任务（FOR UPDATE SKIP LOCKED）。"""
+    async def claim_pending(
+        self, retryable_ids: list[int] | None = None
+    ) -> KbBuildTask | None:
+        """抢占一个 pending 任务；有到期重试 ID 时优先抢占 failed 任务。"""
+        if retryable_ids:
+            task = await self._claim_by_retryable_ids(retryable_ids)
+            if task is not None:
+                return task
+
         stmt = (
             select(KbBuildTask)
             .where(KbBuildTask.status == "pending")
@@ -26,6 +33,28 @@ class KbBuildTaskRepo(BaseRepository[KbBuildTask]):
         if task is not None:
             task.status = "running"
             task.started_at = datetime.now(UTC)
+            await self.session.flush()
+        return task
+
+    async def _claim_by_retryable_ids(
+        self, retryable_ids: list[int]
+    ) -> KbBuildTask | None:
+        stmt = (
+            select(KbBuildTask)
+            .where(
+                KbBuildTask.id.in_(retryable_ids),
+                KbBuildTask.status == "failed",
+            )
+            .order_by(KbBuildTask.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        result = await self.session.execute(stmt)
+        task = result.scalar_one_or_none()
+        if task is not None:
+            task.status = "running"
+            task.started_at = datetime.now(UTC)
+            task.finished_at = None
             await self.session.flush()
         return task
 

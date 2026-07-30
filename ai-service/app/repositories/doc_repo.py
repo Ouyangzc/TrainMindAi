@@ -56,3 +56,19 @@ class KnowledgeChunkRepo(BaseRepository[KnowledgeChunk]):
             await self.session.delete(c)
         await self.session.flush()
         return len(chunks)
+
+    async def delete_by_document_version(
+        self,
+        knowledge_base_version_id: int,
+        document_version_id: int,
+    ) -> int:
+        stmt = select(KnowledgeChunk).where(
+            KnowledgeChunk.knowledge_base_version_id == knowledge_base_version_id,
+            KnowledgeChunk.document_version_id == document_version_id,
+        )
+        result = await self.session.execute(stmt)
+        chunks = list(result.scalars().all())
+        for c in chunks:
+            await self.session.delete(c)
+        await self.session.flush()
+        return len(chunks)

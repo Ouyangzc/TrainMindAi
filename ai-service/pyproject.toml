@@ -17,6 +17,7 @@ dependencies = [
     "httpx>=0.28",
     "openai>=1.55",
     "openpyxl>=3",
+    "prometheus-client>=0.21",
     "python-multipart>=0.0.12",
     "pypdf>=5",
     "python-docx>=1",

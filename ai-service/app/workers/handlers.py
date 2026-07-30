@@ -4,7 +4,7 @@ import os
 from collections.abc import Awaitable, Callable
 
 import jieba
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -16,7 +16,7 @@ from app.repositories.embedding_repo import (
     KeywordIndexVersionRepo,
 )
 from app.repositories.task_repo import KbBuildTaskRepo
-from app.services.chunking import process_title_chunk
+from app.services.chunking import process_chunks
 from app.services.embedding import run_embedding_pipeline
 from app.services.parsing import parse_markdown
 from app.services.parsing.dispatcher import parse_file
@@ -121,17 +121,19 @@ async def build_chunk_task(
         raise ValueError(f"document pages not found: {document_version_id}")
 
     await task_repo.update_progress(task, "chunking", 40)
-    chunks = await process_title_chunk(
+    strategy_code = payload.get("chunk_strategy_code")
+    chunks = await process_chunks(
         session,
         knowledge_base_version_id=kb_version_id,
         course_id=course_id,
         document_id=document_id,
         document_version_id=document_version_id,
         pages=pages,
+        strategy_code=str(strategy_code) if strategy_code else None,
     )
 
     chunk_repo = KnowledgeChunkRepo(session)
-    await chunk_repo.delete_by_version(kb_version_id)
+    await chunk_repo.delete_by_document_version(kb_version_id, document_version_id)
     await chunk_repo.add_all(chunks)
     await task_repo.update_progress(task, "chunked", 100)
 
@@ -210,6 +212,22 @@ async def structure_knowledge_task(
     await _update_progress(session, task_id, "structure_skipped", 100)
 
 
+async def _cleanup_kb_version_artifacts(
+    session: AsyncSession, knowledge_base_version_id: int
+) -> None:
+    """Remove partial chunks and index versions for a failed version build."""
+    for model in (EmbeddingIndexVersion, KeywordIndexVersion):
+        result = await session.execute(
+            select(model).where(
+                model.knowledge_base_version_id == knowledge_base_version_id
+            )
+        )
+        for row in result.scalars().all():
+            await session.delete(row)
+
+    await KnowledgeChunkRepo(session).delete_by_version(knowledge_base_version_id)
+
+
 async def build_knowledge_base_version_task(
     task_id: int, task_type: str, payload: dict, session: AsyncSession
 ) -> None:
@@ -219,47 +237,64 @@ async def build_knowledge_base_version_task(
     if task is None:
         raise ValueError(f"task not found: {task_id}")
 
-    result = await session.execute(
-        text(
-            "SELECT d.course_id, s.document_id, s.document_version_id "
-            "FROM public.knowledge_base_version_document s "
-            "JOIN public.course_document d ON d.id = s.document_id "
-            "JOIN public.course_document_version v ON v.id = s.document_version_id "
-            "WHERE s.knowledge_base_version_id = :version_id "
-            "AND s.del_flag = '0' AND d.del_flag = '0' "
-            "AND v.del_flag = '0' AND v.status = 'parsed' "
-            "ORDER BY s.id"
-        ),
-        {"version_id": task.knowledge_base_version_id},
-    )
-    documents = result.mappings().all()
-    if not documents:
-        raise ValueError("knowledge base snapshot is empty")
+    cleanup_on_failure = False
+    try:
+        result = await session.execute(
+            text(
+                "SELECT d.course_id, s.document_id, s.document_version_id "
+                "FROM public.knowledge_base_version_document s "
+                "JOIN public.course_document d ON d.id = s.document_id "
+                "JOIN public.course_document_version v ON v.id = s.document_version_id "
+                "WHERE s.knowledge_base_version_id = :version_id "
+                "AND s.del_flag = '0' AND d.del_flag = '0' "
+                "AND v.del_flag = '0' AND v.status = 'parsed' "
+                "ORDER BY s.id"
+            ),
+            {"version_id": task.knowledge_base_version_id},
+        )
+        documents = result.mappings().all()
+        if not documents:
+            raise ValueError("knowledge base snapshot is empty")
 
-    chunk_repo = KnowledgeChunkRepo(session)
-    await chunk_repo.delete_by_version(task.knowledge_base_version_id)
-    all_chunks = []
-    for index, document in enumerate(documents, start=1):
-        pages = await DocumentPageRepo(session).list_by_version(document["document_version_id"])
-        if not pages:
-            raise ValueError(
-                f"document pages not found: {document['document_version_id']}"
+        chunk_repo = KnowledgeChunkRepo(session)
+        cleanup_on_failure = True
+        await chunk_repo.delete_by_version(task.knowledge_base_version_id)
+        all_chunks = []
+        for index, document in enumerate(documents, start=1):
+            pages = await DocumentPageRepo(session).list_by_version(
+                document["document_version_id"]
             )
-        chunks = await process_title_chunk(
-            session,
-            knowledge_base_version_id=task.knowledge_base_version_id,
-            course_id=document["course_id"],
-            document_id=document["document_id"],
-            document_version_id=document["document_version_id"],
-            pages=pages,
+            if not pages:
+                raise ValueError(
+                    f"document pages not found: {document['document_version_id']}"
+                )
+            strategy_code = payload.get("chunk_strategy_code")
+            chunks = await process_chunks(
+                session,
+                knowledge_base_version_id=task.knowledge_base_version_id,
+                course_id=document["course_id"],
+                document_id=document["document_id"],
+                document_version_id=document["document_version_id"],
+                pages=pages,
+                strategy_code=str(strategy_code) if strategy_code else None,
+            )
+            all_chunks.extend(chunks)
+            await task_repo.update_progress(
+                task, "chunking_documents", int(index / len(documents) * 60)
+            )
+        await chunk_repo.add_all(all_chunks)
+        await build_keyword_index_task(
+            task_id, "build_keyword_index", payload, session
         )
-        all_chunks.extend(chunks)
-        await task_repo.update_progress(
-            task, "chunking_documents", int(index / len(documents) * 60)
+        await build_embedding_index_task(
+            task_id, "build_embedding_index", payload, session
         )
-    await chunk_repo.add_all(all_chunks)
-    await build_keyword_index_task(task_id, "build_keyword_index", payload, session)
-    await build_embedding_index_task(task_id, "build_embedding_index", payload, session)
+    except Exception:
+        if cleanup_on_failure:
+            await _cleanup_kb_version_artifacts(
+                session, task.knowledge_base_version_id
+            )
+        raise
 
 
 async def rebuild_knowledge_base_version_task(

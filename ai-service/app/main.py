@@ -2,7 +2,9 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.responses import Response
 
 from app.api.internal.v1.router import health_router, internal_router
 from app.core.config import settings
@@ -13,6 +15,12 @@ from app.core.redis import redis_client
 
 setup_logging()
 log = get_logger(__name__)
+metrics_router = APIRouter()
+
+
+@metrics_router.get("/metrics")
+async def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @asynccontextmanager
@@ -33,4 +41,5 @@ app = FastAPI(
 
 register_exception_handlers(app)
 app.include_router(health_router)
+app.include_router(metrics_router)
 app.include_router(internal_router)
