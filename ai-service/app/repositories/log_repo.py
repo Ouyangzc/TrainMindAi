@@ -1,6 +1,6 @@
 """检索日志 / 模型调用日志仓储。"""
 
-from app.models.logs import ModelCallLog, QaRetrievalLog
+from app.models.logs import ModelCallLog, QaAnswerObservation, QaRetrievalLog
 from app.repositories.base import BaseRepository
 
 
@@ -47,3 +47,11 @@ class ModelCallLogRepo(BaseRepository[ModelCallLog]):
             error_message=error_message,
         )
         return await self.add(log)
+
+
+class QaAnswerObservationRepo(BaseRepository[QaAnswerObservation]):
+    def __init__(self, session):  # noqa: ANN001
+        super().__init__(session, QaAnswerObservation)
+
+    async def log_observation(self, **values) -> QaAnswerObservation:  # noqa: ANN003
+        return await self.add(QaAnswerObservation(**values))

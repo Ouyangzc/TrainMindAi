@@ -7,4 +7,5 @@ import com.hezal.system.domain.dto.AiQaRequest;
 public interface AiQaClient
 {
     AiQaAnswer answer(AiQaRequest request);
+    void answerStream(AiQaRequest request, AiQaStreamHandler handler);
 }

@@ -171,6 +171,83 @@ export interface CourseMember extends BaseEntity {
   endAt?: string
 }
 
+export type QaAnswerStatus = 'pending' | 'grounded' | 'insufficient_evidence' | 'service_unavailable' | 'completed'
+
+export interface QaObservationQuery extends PageDomain {
+  answerStatus?: QaAnswerStatus | ''
+  retrievalChannel?: string
+  warningType?: string
+  beginTime?: string
+  endTime?: string
+}
+
+export interface QaObservationSummary {
+  questionCount?: number
+  insufficientEvidenceCount?: number
+  noValidCitationCount?: number
+  weakCitationCount?: number
+  fallbackCount?: number
+  insufficientEvidenceRate?: number
+  noValidCitationRate?: number
+  weakCitationRate?: number
+  fallbackRate?: number
+  p95TotalLatencyMs?: number
+}
+
+export interface QaObservationItem {
+  messageId: number
+  sessionId?: number
+  userId?: number
+  question?: string
+  answerPreview?: string
+  answerStatus?: QaAnswerStatus
+  rejectReason?: string
+  retrievalLogRef?: number
+  retrievalChannel?: string
+  warningsJson?: string
+  citationCount?: number
+  topScore?: number
+  totalLatencyMs?: number
+  createTime?: string
+}
+
+export interface QaRetrievalTopSource {
+  chunkId?: number
+  documentId?: number
+  documentVersionId?: number
+  documentTitle?: string
+  sourceFile?: string
+  pageStart?: number
+  pageEnd?: number
+  sectionTitle?: string
+  score?: number
+  rankNo?: number
+  usedInPrompt?: boolean
+  cited?: boolean
+}
+
+export interface QaObservationDetail extends QaObservationItem {
+  answer?: string
+  retrievalLatencyMs?: number
+  llmLatencyMs?: number
+  firstTokenMs?: number
+  citations?: Array<{
+    id: number
+    chunkId?: number
+    documentId: number
+    documentVersionId: number
+    documentTitle: string
+    versionNo?: number
+    sourceFile?: string
+    pageStart?: number
+    pageEnd?: number
+    sectionTitle?: string
+    score?: number
+    rankNo?: number
+  }>
+  topSources?: QaRetrievalTopSource[]
+}
+
 export type CourseListResult = TableDataInfo<Course[]>
 export type CourseResult = AjaxResult<Course>
 export type CourseModuleListResult = AjaxResult<CourseModule[]>
@@ -185,3 +262,6 @@ export type KnowledgeBaseBuildTaskResult = AjaxResult<KnowledgeBaseBuildTask>
 export type KnowledgeBaseBuildTaskPageResult = AjaxResult<KnowledgeBaseBuildTaskPage>
 export type CourseMemberListResult = AjaxResult<CourseMember[]>
 export type CourseMemberResult = AjaxResult<CourseMember>
+export type QaObservationSummaryResult = AjaxResult<QaObservationSummary>
+export type QaObservationListResult = TableDataInfo<QaObservationItem[]>
+export type QaObservationDetailResult = AjaxResult<QaObservationDetail>

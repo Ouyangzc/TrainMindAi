@@ -1,9 +1,13 @@
 import request from '@/utils/request'
+import { getToken } from '@/utils/auth'
 import type {
   StudentCourseListResult,
   StudentCourseResult,
   StudentQaMessageListResult,
   StudentQaMessageResult,
+  StudentQaStreamEvent,
+  StudentQaStreamEventName,
+  StudentQaStreamHandlers,
   StudentQaSessionListResult,
   StudentQaSessionResult,
   StudentCourseOutlineResult,
@@ -68,6 +72,71 @@ export function askCourseQuestion(
     timeout: 35000,
     headers: { repeatSubmit: false, interval: 1000 }
   })
+}
+
+export async function streamCourseQuestion(
+  courseId: number,
+  sessionId: number,
+  question: string,
+  handlers: StudentQaStreamHandlers = {}
+) {
+  const token = getToken()
+  const response = await fetch(
+    `${import.meta.env.VITE_APP_BASE_API}/student/courses/${courseId}/chat/sessions/${sessionId}/messages/stream`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=utf-8',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ question }),
+      signal: handlers.signal
+    }
+  )
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.body) throw new Error('流式响应不可用')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    buffer = consumeSseBuffer(buffer, handlers)
+  }
+
+  buffer += decoder.decode()
+  consumeSseBuffer(buffer, handlers, true)
+}
+
+function consumeSseBuffer(
+  buffer: string,
+  handlers: StudentQaStreamHandlers,
+  flush = false
+) {
+  const frames = buffer.split(/\r?\n\r?\n/)
+  const remaining = flush ? '' : frames.pop() || ''
+  for (const frame of frames) {
+    const event = parseSseFrame(frame)
+    if (event) handlers.onEvent?.(event)
+  }
+  return remaining
+}
+
+function parseSseFrame(frame: string): StudentQaStreamEvent | null {
+  let eventName: StudentQaStreamEventName = 'metadata'
+  const dataLines: string[] = []
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith('event:')) eventName = line.slice(6).trim() as StudentQaStreamEventName
+    if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+  }
+  if (!dataLines.length) return null
+  return {
+    event: eventName,
+    data: JSON.parse(dataLines.join('\n'))
+  }
 }
 
 export function getStudentCourseOutline(courseId: number): Promise<StudentCourseOutlineResult> {

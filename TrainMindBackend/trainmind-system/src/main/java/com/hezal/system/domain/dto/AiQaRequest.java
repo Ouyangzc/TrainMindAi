@@ -1,5 +1,8 @@
 package com.hezal.system.domain.dto;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Java 业务后端调用 AI 问答的可信上下文。 */
 public class AiQaRequest
 {
@@ -9,6 +12,7 @@ public class AiQaRequest
     private Long sessionId;
     private Long messageId;
     private String question;
+    private List<AiQaHistoryTurn> history = new ArrayList<>();
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
@@ -22,4 +26,6 @@ public class AiQaRequest
     public void setMessageId(Long messageId) { this.messageId = messageId; }
     public String getQuestion() { return question; }
     public void setQuestion(String question) { this.question = question; }
+    public List<AiQaHistoryTurn> getHistory() { return history; }
+    public void setHistory(List<AiQaHistoryTurn> history) { this.history = history; }
 }

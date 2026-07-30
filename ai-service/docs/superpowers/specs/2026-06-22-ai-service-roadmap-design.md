@@ -1,7 +1,7 @@
 # TrainMindAi ai-service 任务路线图设计
 
 > 日期: 2026-06-22
-> 状态: Phase 1 已实施，Phase 2 待开始
+> 状态: Phase 1-3 核心能力已实施；Phase 3 QA 可观测性补充已实施
 > 对应项目: `trainmind-ai-service` (FastAPI Python AI 服务)
 
 ---
@@ -17,19 +17,19 @@
 | API stub 路由 | ✅ 完成；文档解析入队契约已补齐 |
 | Gateway 客户端 (LLM / Embedding) | ✅ 完成 |
 | 文档解析 (Markdown/PDF/PPTX/DOCX/XLSX) | ✅ Phase 1 完成 |
-| Chunk 策略 (title / fixed_size) | ⚠️ MVP |
-| 混合检索 (pgvector + PG FTS) | ⚠️ MVP |
-| RAG 问答 (同步) | ⚠️ MVP |
-| Worker 管道 (document_parse_task + kb_build_task) | ⚠️ MVP；解析任务已独立，KB 构建链路仍待 Phase 2 健壮化 |
+| Chunk 策略 (title / fixed_size / semantic) | ✅ Phase 2 完成配置化 |
+| 混合检索 (pgvector + PG FTS) | ✅ Phase 3 完成查询规范化、语言检测、降级和 MMR |
+| RAG 问答 (同步) | ✅ Phase 3 完成 prompt 配置化、引用校验和多轮上下文；QA 质量观测待补强 |
+| Worker 管道 (document_parse_task + kb_build_task) | ✅ Phase 2 完成并发、重试、回滚和任务可观测 |
 | 关键词索引 (jieba + PG FTS tsvector) | ⚠️ MVP |
-| SSE 流式问答 | ❌ 占位 |
+| SSE 流式问答 | ✅ Phase 3 完成 AI SSE、Java 代理落库和 Vue 增量渲染 |
 | PDF/PPTX/DOCX/XLSX 解析 | ✅ Phase 1 完成 |
 | AI 出题 | ❌ 占位 |
 | 错题诊断 | ❌ 占位 |
 | 简答评分 | ⚠️ 草稿实现 |
 | RAG 离线评估 | ❌ 占位 |
-| 健壮性 (重试/并发/降级/可观测) | ⚠️ Phase 1 已补解析超时/下载校验；并发/降级/指标仍待后续阶段 |
-| 测试覆盖 | ⚠️ Phase 1 新增解析/API/Worker 测试；coverage 报告待安装 pytest-cov |
+| 健壮性 (重试/并发/降级/可观测) | ⚠️ 构建管道与检索降级已完成；学员问答质量观测待补强 |
+| 测试覆盖 | ⚠️ AI 服务 69 项通过；coverage 报告待安装 pytest-cov |
 
 ## 2. 总体架构
 
@@ -331,90 +331,196 @@ Phase 1 后，资料解析任务已经从 `ai.kb_build_task` 拆出，落在 Jav
 
 ### 目标
 
-补齐 SSE 流式问答、多轮对话上下文、引用校验、检索降级、MMR 多样性和 prompt 配置化。
+在 Phase 2 已完成索引构建健壮化的基础上，提升学员端问答质量和交互体验：
+查询规范化、检索降级、MMR 多样性、引用校验、prompt 配置化、多轮上下文、SSE 流式问答和 QA 可观测性。
+
+### 当前基线（2026-07-30）
+
+- AI service 已有同步 `/internal/v1/qa/answer` 和 SSE `/internal/v1/qa/answer/stream`，入口执行 query rewrite → hybrid retrieval → RAG prompt → LLM。
+- `hybrid_retrieve` 已接入 pgvector + PostgreSQL FTS，并写入 `ai.qa_retrieval_log`。
+- `ai.qa_retrieval_log` 已能审计每次问答的检索结果、rank、score、`retrieval_channel` 和 `used_in_prompt`；Top3 可通过 `message_id + rank_no <= 3` 追溯。
+- `ai.model_call_log` 已有 `latency_ms`、token 字段，但当前 QA 路径尚未完整写入耗时和 token usage。
+- Java 学员端 `StudentQaServiceImpl` 负责会话、消息、citation 落库和 SSE 代理，`qa_message` 保存学员问题、助手回答、回答状态和 `retrieval_log_ref`。
+- Vue 学员助教页 `TrainMindFront/src/views/student/course-space/assistant.vue` 已支持流式渲染和引用卡片，但没有面向教师/运营的 QA 观测页面。
+
+### 设计边界
+
+- AI service 是检索、RAG 和模型调用的可信计算层，不直接暴露给浏览器。
+- Java/RuoYi 是学员身份、课程权限、会话消息、citation 落库和 SSE 代理层。
+- 前端只调用 Java/RuoYi 学员端 API，不携带 AI internal token。
+- 多轮上下文不能从 AI 日志恢复完整 Q&A；必须由 Java 从 `qa_message` 读取最近轮次后传入 AI 请求。
+- 流式问答不能只实现 AI SSE；验收需要 Java 代理流、最终落库和 Vue 增量渲染同时可用。
+- 可观测性分为两层：AI service 负责链路指标和质量信号落库；Java/RuoYi 负责权限过滤、课程维度聚合和页面 API。
+- AI 日志不保存完整助手回答文本，完整问题/回答仍以 Java `qa_message` 为准，避免在 AI schema 中重复保存业务内容。
+- QA 质量观测先使用自动信号，不在 Phase 3 补充任务中引入人工标注流；人工反馈可作为 Phase 5 评估体系输入。
 
 ### 任务清单
 
-#### 3.1 SSE 流式问答
+#### 3.1 查询规范化与中英文检测
 
-- 实现 `/qa/answer/stream`：使用 `StreamingResponse(media_type="text/event-stream")`
-- 数据流: 改写 → 检索（同步）→ LLM 流式 → 逐 token 推送 `data: {...}\n\n` 事件
-- 最后推送 sources 对象和 `[DONE]` 标记
-- 异常时推送 `data: {"error": "..."}\n\n`（不关闭连接直到 DONE）
+- 检测中文、英文、中英混合输入。
+- 中文继续使用 jieba；英文使用小写空格/标点切词；混合输入保留英文 token 并对中文片段使用 jieba。
+- 不在 Phase 3 MVP 引入同义词词库，避免新增词库维护成本和错误扩展噪声。
+- `query_rewrite` 返回 `language`，用于日志、调试和后续按语言调整检索策略。
 
-**验收标准**: EventSource 收到逐 token 响应；结束事件携带完整 sources 和 log_ref
+**验收标准**: `"ML 算法"` 返回 `language="mixed"`，`keyword_query` 包含 `ML` 和 `算法`；英文问题返回 `language="en"` 并小写化；旧中文问题测试仍通过。
 
-#### 3.2 查询改写增强
+#### 3.2 检索降级策略
 
-- 同义词扩展: 加载内置同义词词典 (`app/services/retrieval/synonyms.json`，JSON 键值对格式如 `{"ML": ["机器学习"]}`)，启动时缓存到内存
-- 中英文检测: 检测输入是纯中文 / 纯英文 / 中英混合
-  - 纯中文 → jieba 分词 + 同义词扩展
-  - 纯英文 → 空格分词 + 小写归一化
-  - 混合 → 双语分词
+- `hybrid_retrieve` 包裹向量检索和关键词检索异常：
+  - 正常：`retrieval_channel="hybrid"`
+  - Embedding 或 vector store 异常：降级到关键词，`retrieval_channel="keyword_only"`
+  - 关键词异常但向量可用：保留向量结果，`retrieval_channel="vector_only"`
+  - 两个通道都不可用：返回空结果，`retrieval_channel="empty"`，由 RAG 拒答处理。
+- 每条 `qa_retrieval_log` 写入实际 `retrieval_channel`；空结果也要写一条日志，保留可审计记录。
 
-**验收标准**: "ML 算法" → keyword_query 含"机器学习 算法"(假设同义词表有 ML→机器学习)
+**验收标准**: Embedding 服务中断时 `/qa/answer` 返回关键词结果或依据不足，不返回 500；日志 channel 正确。
 
-#### 3.3 多轮对话上下文
+#### 3.3 MMR 检索结果多样性
 
-- 读取历史 `qa_retrieval_log` 按 `message_id` 倒序取最近 3 轮
-- 将前轮 Q&A 拼入 prompt 的对话历史区域：
-  ```
-  历史对话：
-  用户: 什么是监督学习？
-  助手: 监督学习是...
-  ---
-  用户: 它和无监督学习有什么区别？
-  ```
-- 合并检索结果: 历史轮次的检索结果不拼入当前 prompt（仅当前轮结果）
+- 实现 MMR rerank，默认由 `RetrievalStrategyConfig.rerank_enabled=false` 关闭。
+- 向量命中的结果携带检索向量或可复查 embedding，MMR 只在有足够 embedding 信息时启用。
+- MMR 后仍限制 `final_top_k`，并在日志写入 `rerank_score` 或保留最终排序。
 
-**验收标准**: 第 2 轮问"它是什么"→ 准确指向前文的"监督学习"
+**验收标准**: 多个近重复 chunk 输入时，启用 MMR 后输出覆盖更多主题；关闭时保持原融合排序。
 
-#### 3.4 引用来源校验
+#### 3.4 RAG prompt 配置化
 
-- LLM 返回后解析 `[来源:N]` 标记
-- 验证每个 N 都在当前检索的 chunks 范围内 (≤ len(fused))
-- 有效引用 → 在 sources 中标注 `source_index=N`
-- 无效引用 → 从答案中移除该标记，在 sources 中添加 `invalid=true`
-- 检查是否引用了分数 < 0.2 的低质量 chunk → 标记 `WEAK_CITATION`
+- `qa_answer` 从 `PromptTemplateRepo.get_by_scenario("qa")` 加载启用模板。
+- `QaAnswerRequest` 增加可选 `prompt_version`；为空时使用最新或默认启用模板。
+- 模板缺失时回退到当前内置默认 prompt。
+- 当前 `prompt_template` 表没有 temperature 字段；Phase 3 不做 schema 迁移，temperature 继续使用默认值，除非后续明确扩表。
 
-**验收标准**: `[来源:1]` 能回溯到 chunk_id；无效引用在 sources 中标记且从答案文本移除
+**验收标准**: 新增 `scenario='qa'` 的启用模板后，同步问答使用该模板；无模板时原行为不回归。
 
-#### 3.5 检索降级策略
+#### 3.5 引用来源校验
 
-- `hybrid_retrieve` 增加降级包裹：
-  1. 正常: Embedding + 关键词并行检索 → 混合融合
-  2. Embedding 异常/超时 → 纯关键词检索
-  3. 关键词也异常 → 空结果 + `RETRIEVAL_EMPTY`
-- 降级链路写入 `qa_retrieval_log.retrieval_channel = "keyword_only"` 或 `"empty"`
+- LLM 返回后解析 `[来源:N]` 标记，同时兼容 prompt 中现有 `[来源 N]` 上下文编号。
+- 有效引用映射到当前 fused chunks，给 `QaSource` 补 `source_index`。
+- 无效引用从答案文本移除，并在响应 warnings 中标记。
+- 分数过低的引用标记 `WEAK_CITATION`，但不阻断回答。
+- Java citation 落库仍只保存业务可展示来源；无效引用不落库。
 
-**验收标准**: Embedding 服务中断 → /qa/answer 返回纯关键词结果不是 500
+**验收标准**: `[来源:1]` 能回溯到 chunk_id；`[来源:99]` 从答案移除并返回 warning；前端引用卡片仍能打开资料。
 
-#### 3.6 检索结果多样性（MMR）
+#### 3.6 多轮上下文契约
 
-- 实现 MMR 算法: 在融合后的结果中迭代选择
-  - 每轮选一个 chunk：兼顾与查询的相关性（高 score）和与已选集的最大差异（低与已选最高相似度）
-  - `lambda` 参数控制多样性强度（默认 0.5），从 `RetrievalStrategyConfig.rerank_enabled` 控制开关
-- 相似度计算：在 `hybrid_retrieve` 返回结果中扩展 `embedding` 字段暂存向量，MMR 阶段做余弦相似度去重
-- MMR 在 `RetrievalStrategyConfig.rerank_enabled=true` 时启用，默认 false（向后兼容）
+- `QaAnswerRequest` 增加可选 `history: list[QaHistoryTurn]`，每轮包含 user/assistant 文本。
+- Java 在调用 AI 前从当前 `qa_session` 读取最近 3 轮 completed/grounded 消息，传给 AI。
+- AI 只把历史拼入 prompt 的对话历史区；当前轮检索仍只基于当前问题，避免历史检索结果污染 sources。
+- 历史内容做长度截断，避免 prompt 过长。
 
-**验收标准**: 10 个同主题 chunk → 只取 1-2 个代表性 chunks，补充其他主题内容
+**验收标准**: 第二轮问“它是什么”时，请求里包含上一轮 Q&A，prompt 中出现历史对话；当前 sources 只来自当前轮检索。
 
-#### 3.7 RAG prompt 配置化
+#### 3.7 AI SSE 流式问答
 
-- `qa_answer` 函数改为从 `PromptTemplateRepo.get_by_scenario("qa")` 加载 prompt
-- 支持 `prompt_version` 参数（从 request 传入），空则取最新 enabled 版本
-- 内置默认 prompt（当前硬编码的 system message）作为兜底
-- LLM 调用的 `temperature` 也改为可从 prompt 模板的配置中读取
+- 实现 AI service `/internal/v1/qa/answer/stream`，返回 `text/event-stream`。
+- 事件类型：
+  - `metadata`：知识库版本、retrieval_log_ref
+  - `token`：模型增量文本
+  - `sources`：最终结构化来源和 warnings
+  - `error`：可恢复错误
+  - `done`：结束
+- 流式路径复用同步 QA 的检索、prompt、拒答、引用校验逻辑。
 
-**验收标准**: 新增一条 `scenario='qa'` 的 prompt 并设为 enabled → 问答立即使用新 prompt
+**验收标准**: AI SSE 测试能收到 token、sources、done；低分拒答和 LLM 异常也以事件形式结束。
 
-#### 3.8 测试
+#### 3.8 Java/RuoYi 流式代理与落库
+
+- `AiQaClient` 增加 stream 能力，`HttpAiQaClient` 调用 AI SSE。
+- `StudentQaService` 增加流式 ask 方法：创建 user/assistant pending，边代理 token 边累积答案，结束时完成 assistant 消息并落 citation。
+- `StudentQaController` 新增学员端 stream endpoint，继续使用 `isAuthenticated()` 和课程访问校验。
+- 保持原同步接口可用，作为兼容和降级入口。
+
+**验收标准**: 浏览器只连 Java 学员端接口即可收到 token；stream 完成后刷新历史消息能看到完整答案和引用。
+
+#### 3.9 Vue 学员端流式体验
+
+- `assistant.vue` 发送问题时优先使用 stream endpoint，实时更新 assistant 气泡内容。
+- `sources` 事件到达后渲染引用卡片；失败时保留重试能力。
+- 若 stream 不可用，允许回退到现有同步 `askCourseQuestion`。
+
+**验收标准**: 学员端页面能看到逐步出现的答案，完成后 citation 卡片可点击打开资料。
+
+#### 3.10 测试
 
 - SSE 流式集成测试（Mock LLM stream）
 - 降级场景 3 条路径（正常/embedding 降级/全部降级）
 - 多轮上下文拼接测试
 - 引用校验覆盖（有效/无效/空/弱引用）
 - MMR 多样性验证（输入 N 个相似结果 → 输出去重后分布）
+- Java stream 代理编译验证
+- 前端生产构建验证
+
+#### 3.11 QA 可观测性指标契约
+
+为后续优化检索、prompt、chunk 策略和模型调用，需要能回答三类问题：
+
+- 单次追踪：某个学员问题使用了哪个知识库版本、检索 Top3 是什么、最终引用了哪些来源、是否触发降级、整体耗时是多少。
+- 聚合分析：某课程最近问题量、拒答率、无有效引用率、弱引用率、降级率、平均/p95 耗时、Top 问题分布。
+- 质量定位：哪些问题经常低分、哪些资料经常被检索但不被引用、哪些课程回答无引用或弱引用比例偏高。
+
+MVP 指标契约：
+
+- Trace identifiers: `course_id`, `session_id`, `message_id`, `knowledge_base_version_id`, `retrieval_log_ref`, `request_id`
+- Query signals: `raw_query`, `normalized_query`, `language`, `keyword_query`, `semantic_query`
+- Retrieval signals: `retrieval_channel`, `top_score`, `top3 chunk_id/document_id/page/section/final_score/used_in_prompt`
+- Answer signals: `answer_status`, `reject_reason`, `warnings`, `source_count`, `cited_source_count`, `invalid_citation_count`, `weak_citation_count`, `no_valid_citation`
+- Latency signals: `retrieval_latency_ms`, `llm_latency_ms`, `first_token_ms`, `total_latency_ms`
+- Model signals: `provider`, `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `success`, `error_code`
+
+实现边界：
+
+- Top3 不新建重复明细表，优先复用 `ai.qa_retrieval_log` 的 rank 记录。
+- 新增轻量汇总表或日志模型记录单次回答质量摘要，避免每次分析都跨 `qa_retrieval_log`、`model_call_log`、`qa_message` 做重查询。
+- 若模型 provider 暂不返回 token usage，token 字段允许为空；后续 provider 支持 usage 后再补齐。
+- 页面优先展示指标和 trace，不在本阶段做人工打分、批注、导出和离线评测闭环。
+
+**验收标准**: 给定一个 `message_id`，能查到该问题的 Top3 检索来源、最终引用来源、回答状态、warnings、检索通道、耗时；按课程能统计拒答率、无有效引用率、弱引用率和 p95 总耗时。
+
+#### 3.12 AI QA 观测落库
+
+- 增加 QA 观测汇总模型和迁移，例如 `ai.qa_answer_observation`。
+- 同步和 SSE 两条 QA 路径都记录：
+  - 检索耗时、LLM 耗时、首 token 耗时、总耗时。
+  - 回答状态、拒答原因、warnings 和引用统计。
+  - 与 `qa_retrieval_log`、`model_call_log`、Java `qa_message` 的弱关联 id。
+- `model_call_log.latency_ms` 在同步和流式路径都实际写入；token usage 不可得时保持 null。
+- `qa_retrieval_log` 补充 `language` 或通过汇总表保存语言信号，支持后续按中文/英文/混合问题分析效果。
+
+**验收标准**: 同步问答、流式问答、低分拒答、LLM 异常四类路径均写入观测记录；日志记录不影响主问答返回。
+
+#### 3.13 Java/RuoYi QA 观测 API
+
+- 新增教师/管理员可用的课程 QA 观测查询接口。
+- 列表维度：
+  - 课程、日期范围、回答状态、检索通道、warning 类型筛选。
+  - 展示问题、回答状态、引用数量、Top score、检索通道、总耗时、创建时间。
+- 详情维度：
+  - 展示问题、回答、最终 citation。
+  - 展示 AI 检索 Top3：资料、页码、section、score、是否进入 prompt、是否被最终引用。
+  - 展示 warnings、reject reason、模型、耗时拆分。
+- 权限边界：学员只能看自己的问答历史；教师/管理员观测接口必须按课程权限过滤。
+
+**验收标准**: 教师打开某课程 QA 观测列表能看到每次问答摘要；点开详情能看到 Top3 检索来源和最终引用对比。
+
+#### 3.14 Vue QA 观测页面
+
+- 新增课程 QA 观测页面或在课程管理详情中增加 “AI 问答观测” tab。
+- 页面包含：
+  - 指标卡：问题数、拒答率、无有效引用率、弱引用率、降级率、p95 总耗时。
+  - 问答列表：问题、状态、引用数、Top score、检索通道、耗时、时间。
+  - 详情抽屉：完整问答、Top3 检索来源、最终引用、warnings、耗时拆分。
+- 首版不做复杂图表，优先保证定位问题的效率。
+
+**验收标准**: 非技术用户能在页面上定位某个差回答的检索 Top3、最终引用和质量 warning，无需直接查库。
+
+#### 3.15 QA 可观测性验证
+
+- AI 单元测试覆盖观测记录写入和异常不阻断。
+- Java compile 覆盖观测 API/DTO/Mapper。
+- 前端生产构建验证观测页面。
+- 用 SQL 或测试数据验证课程级聚合指标。
 
 ---
 

@@ -20,7 +20,7 @@ from app.models.kb import (
     KeywordIndexVersion,
     KnowledgeChunk,
 )
-from app.models.logs import ModelCallLog, QaRetrievalLog
+from app.models.logs import ModelCallLog, QaAnswerObservation, QaRetrievalLog
 
 __all__ = [
     "Base",
@@ -34,6 +34,7 @@ __all__ = [
     "ChunkEmbedding",
     "KbBuildTask",
     "QaRetrievalLog",
+    "QaAnswerObservation",
     "ModelCallLog",
     "RagEvalDataset",
     "RagEvalCase",

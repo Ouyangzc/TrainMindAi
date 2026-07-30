@@ -17,6 +17,7 @@ public class AiQaAnswer
     @JsonProperty("retrieval_log_ref")
     private Long retrievalLogRef;
     private List<AiQaSource> sources = new ArrayList<>();
+    private List<String> warnings = new ArrayList<>();
 
     public String getAnswer() { return answer; }
     public void setAnswer(String answer) { this.answer = answer; }
@@ -30,4 +31,6 @@ public class AiQaAnswer
     public void setRetrievalLogRef(Long retrievalLogRef) { this.retrievalLogRef = retrievalLogRef; }
     public List<AiQaSource> getSources() { return sources; }
     public void setSources(List<AiQaSource> sources) { this.sources = sources; }
+    public List<String> getWarnings() { return warnings; }
+    public void setWarnings(List<String> warnings) { this.warnings = warnings; }
 }

@@ -56,16 +56,20 @@ Modify:
 
 ```
 Create:
-  app/services/retrieval/synonyms.json     # Synonym dictionary
   tests/test_rag_stream.py                 # SSE streaming tests
   tests/test_retrieval_degradation.py      # Degradation tests
   tests/test_mmr.py                        # MMR diversity tests
 
 Modify:
-  app/services/retrieval/__init__.py       # Query rewrite + degradation + MMR
+  app/services/retrieval/__init__.py       # Query normalization + degradation + MMR
   app/services/rag/__init__.py             # SSE + multi-turn + citation check + prompt config
   app/api/internal/v1/qa.py                # Wire up stream endpoint
   app/schemas/qa.py                        # Extend response schemas
+  TrainMindBackend/.../AiQaClient.java     # Java AI client stream contract
+  TrainMindBackend/.../StudentQaServiceImpl.java # History context + stream persistence
+  TrainMindBackend/.../StudentQaController.java  # Student stream proxy endpoint
+  TrainMindFront/src/api/student.ts        # Student stream request helper
+  TrainMindFront/src/views/student/course-space/assistant.vue # Token streaming UX
 ```
 
 ### Phase 4 — Question Generation / Diagnosis / Grading
@@ -2173,663 +2177,350 @@ retry count, timestamps, and error detail.
 
 # Phase 3: Retrieval + RAG Enhancement
 
-## Task 3.1: SSE streaming Q&A
+> **Status:** Design revised on 2026-07-30 to match the current monorepo implementation after Phase 2.
+>
+> **Current baseline:**
+> - AI service already supports synchronous `/internal/v1/qa/answer` with hybrid pgvector + PG FTS retrieval.
+> - `LlmClient.chat_stream` exists, but `/internal/v1/qa/answer/stream` is still a stub.
+> - Java `StudentQaServiceImpl` owns student session/message/citation persistence and currently calls AI synchronously.
+> - Vue student assistant page renders synchronous answers and citation cards, but has no token streaming.
+> - `ai.model_call_log` does not store full answer text, so AI service cannot reconstruct multi-turn Q&A history by itself.
+>
+> **Design decision:** Phase 3 must be implemented as an AI + Java/RuoYi + Vue companion slice where needed. Browser clients never call AI internal endpoints directly.
+
+## Task 3.1: Query normalization and language detection
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_retrieval.py -q` → 6 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/retrieval/__init__.py tests/test_retrieval.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/retrieval/__init__.py` → Success
+
+**Why:** Current `query_rewrite` only strips whitespace and runs jieba. That is acceptable for Chinese, but weak for English and mixed Chinese/English questions because English terms are not normalized consistently.
+
+**Implementation:** Detect `zh | en | mixed`; keep jieba for Chinese; lowercase and split English by spaces/punctuation; for mixed input, preserve English tokens and segment Chinese spans with jieba. Do not add a synonym dictionary in Phase 3 MVP, because that introduces a manually maintained vocabulary and possible noisy expansion.
 
 **Files:**
-- Modify: `app/api/internal/v1/qa.py`
-- Modify: `app/services/rag/__init__.py`
-- Test: `tests/test_rag_stream.py`
+- Modify: `ai-service/app/services/retrieval/__init__.py`
+- Test: `ai-service/tests/test_retrieval.py`
 
-- [ ] **Step 1: Add stream method to LlmClient**
+**Acceptance:** `"ML 算法"` returns `language="mixed"` and a `keyword_query` containing `ML` and `算法`; `"What is Machine Learning?"` returns `language="en"` and lowercase English terms; existing Chinese rewrite tests still pass.
 
-In `app/gateway/llm_client.py`, the `chat_stream` method already exists (verified). Confirm:
+## Task 3.2: Retrieval degradation strategy
 
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_retrieval.py tests/test_retrieval_degradation.py -q` → 9 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/retrieval/__init__.py tests/test_retrieval.py tests/test_retrieval_degradation.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/retrieval/__init__.py` → Success
+
+**Why:** Current `hybrid_retrieve` fails the whole QA request when embedding/vector search raises. Student QA should degrade to keyword retrieval or an evidence-insufficient answer instead of returning 500.
+
+**Implementation:** Wrap vector and keyword retrieval independently. Use `retrieval_channel="hybrid" | "keyword_only" | "vector_only" | "empty"`; log the channel to `qa_retrieval_log`. For empty retrieval, create an audit log row with `reject_reason="RETRIEVAL_EMPTY"` when possible.
+
+**Files:**
+- Modify: `ai-service/app/services/retrieval/__init__.py`
+- Test: `ai-service/tests/test_retrieval_degradation.py`
+
+**Acceptance:** Embedding/vector failure still returns keyword hits; vector + keyword failure returns empty results and `/qa/answer` responds with insufficient evidence, not 500.
+
+## Task 3.3: MMR retrieval diversity
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_retrieval.py tests/test_retrieval_degradation.py tests/test_mmr.py -q` → 12 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/retrieval/__init__.py tests/test_retrieval.py tests/test_retrieval_degradation.py tests/test_mmr.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/retrieval/__init__.py` → Success
+
+**Why:** Hybrid fusion can over-select near-duplicate chunks from the same section. MMR improves answer context coverage without changing index structure.
+
+**Implementation:** Add pure MMR helpers in retrieval service. Enable only when `RetrievalStrategyConfig.rerank_enabled=true`; keep default off. Use vector-hit embeddings only when available, otherwise preserve current ranking.
+
+**Files:**
+- Modify: `ai-service/app/services/retrieval/__init__.py`
+- Test: `ai-service/tests/test_mmr.py`
+
+**Acceptance:** With repeated similar chunks and one distinct chunk, MMR selects a more diverse top-k when enabled; disabled mode keeps existing order.
+
+## Task 3.4: RAG prompt configuration
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_qa.py -q` → 3 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py tests/test_qa.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py` → Success
+
+**Why:** QA prompt is currently hardcoded. Operators need DB-configurable prompts before retrieval/RAG tuning can be iterated without redeploying AI code.
+
+**Implementation:** Load enabled `scenario='qa'` templates through `PromptTemplateRepo`. Add optional `prompt_version` to `QaAnswerRequest`; if missing, use the latest enabled QA template. Fall back to the current built-in prompt. Do not add temperature schema migration in Phase 3 unless explicitly approved, because `prompt_template` currently has no temperature column.
+
+**Files:**
+- Modify: `ai-service/app/schemas/qa.py`
+- Modify: `ai-service/app/services/rag/__init__.py`
+- Test: `ai-service/tests/test_qa.py`
+
+**Acceptance:** A mocked enabled QA template is used in prompt construction; no-template path preserves current prompt behavior.
+
+## Task 3.5: Citation validation
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_qa.py -q` → 6 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py tests/test_qa.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py` → Success
+> - `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
+
+**Why:** The current response returns all fused chunks as sources regardless of what the LLM actually cites. Invalid `[来源:N]` markers are not cleaned, which can mislead students.
+
+**Implementation:** Parse answer citations, map valid indices to current chunks, remove invalid markers from answer text, and return `warnings` plus `source_index` metadata. Java persists only valid business sources as citation cards.
+
+**Files:**
+- Modify: `ai-service/app/schemas/qa.py`
+- Modify: `ai-service/app/services/rag/__init__.py`
+- Modify: `ai-service/app/api/internal/v1/qa.py`
+- Modify if needed: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/domain/dto/AiQaSource.java`
+- Test: `ai-service/tests/test_qa.py`
+
+**Acceptance:** `[来源:1]` maps to chunk 1; `[来源:99]` is removed and returned as a warning; source cards still open the correct document in the Vue student page.
+
+## Task 3.6: Multi-turn context contract
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_qa.py -q` → 7 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py tests/test_qa.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py` → Success
+> - `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
+
+**Why:** AI logs do not store full assistant answers, so the old plan to reconstruct history from `qa_retrieval_log` is not viable. Java already owns `qa_message`, so it should pass recent Q&A turns to AI.
+
+**Implementation:** Add `QaHistoryTurn` and optional `history` to AI request schema. Java loads the latest 3 completed/grounded Q&A turns from the same session before creating the new AI request. AI includes history in prompt only; retrieval still uses the current question only.
+
+**Files:**
+- Modify: `ai-service/app/schemas/qa.py`
+- Modify: `ai-service/app/services/rag/__init__.py`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/domain/dto/AiQaRequest.java`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/service/impl/StudentQaServiceImpl.java`
+- Modify if needed: `TrainMindBackend/trainmind-system/src/main/resources/mapper/system/StudentQaMapper.xml`
+- Test: AI prompt unit test; Java compile validation
+
+**Acceptance:** A second-turn question sends prior Q&A history to AI; prompt includes history; current response sources still come only from current retrieval.
+
+## Task 3.7: AI SSE stream endpoint
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_qa.py tests/test_rag_stream.py -q` → 10 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/api/internal/v1/qa.py app/services/rag/__init__.py app/schemas/qa.py tests/test_qa.py tests/test_rag_stream.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/api/internal/v1/qa.py app/services/rag/__init__.py app/schemas/qa.py` → Success
+
+**Why:** `LlmClient.chat_stream` exists but the API endpoint is still a stub. AI service needs a streaming contract before Java can proxy it.
+
+**Implementation:** Implement `/internal/v1/qa/answer/stream` as `text/event-stream`. Reuse synchronous retrieval, prompt building, rejection, citation validation, and model logging. Emit `metadata`, `token`, `sources`, `error`, and `done` events as JSON SSE frames.
+
+**Files:**
+- Modify: `ai-service/app/api/internal/v1/qa.py`
+- Modify: `ai-service/app/services/rag/__init__.py`
+- Test: `ai-service/tests/test_rag_stream.py`
+
+**Acceptance:** Mock stream test receives token frames, final sources/warnings, and done; low-score and LLM-error paths end with structured events.
+
+## Task 3.8: Java/RuoYi streaming proxy and persistence
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
+
+**Why:** The browser must not call AI internal endpoints, and Java currently owns auth, session lifecycle, assistant message completion, and citation persistence.
+
+**Implementation:** Extend `AiQaClient`/`HttpAiQaClient` with a streaming method. Add a stream ask method in `StudentQaService`: create user + assistant pending messages, proxy AI tokens to the HTTP response while accumulating content, then complete the assistant message and insert citations when the final sources event arrives. Keep the existing synchronous endpoint as fallback.
+
+**Files:**
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/ai/AiQaClient.java`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/ai/impl/HttpAiQaClient.java`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/service/IStudentQaService.java`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/service/impl/StudentQaServiceImpl.java`
+- Modify: `TrainMindBackend/trainmind-admin/src/main/java/com/hezal/web/controller/student/StudentQaController.java`
+
+**Acceptance:** Authenticated student receives streamed answer through Java endpoint; refreshing history shows the completed assistant message and citations.
+
+## Task 3.9: Vue student streaming experience
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `npm run build:prod` in `TrainMindFront` → build succeeded
+
+**Why:** Without front-end streaming support, Phase 3 SSE cannot be seen by users even if back-end streaming works.
+
+**Implementation:** Add a streaming request helper for the student chat endpoint. In `assistant.vue`, create an optimistic assistant message, append token content as frames arrive, apply final answer/status from the `sources` event, then refresh persisted messages so citation cards use Java-enriched citation records. Fall back to synchronous `askCourseQuestion` if stream fails before tokens are received.
+
+**Files:**
+- Modify: `TrainMindFront/src/api/student.ts`
+- Modify: `TrainMindFront/src/types/api/student.ts`
+- Modify: `TrainMindFront/src/views/student/course-space/assistant.vue`
+
+**Acceptance:** Student page shows answer text appearing incrementally; final citations are visible and clickable; retry still works for failures.
+
+## Task 3.10: Phase 3 verification
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_retrieval.py tests/test_retrieval_degradation.py tests/test_mmr.py tests/test_qa.py tests/test_rag_stream.py -q` → 22 passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app/services/retrieval/__init__.py app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py tests/test_retrieval.py tests/test_retrieval_degradation.py tests/test_mmr.py tests/test_qa.py tests/test_rag_stream.py` → All checks passed
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app/services/retrieval/__init__.py app/services/rag/__init__.py app/api/internal/v1/qa.py app/schemas/qa.py` → Success
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/ -q` → 69 passed, 1 Starlette deprecation warning
+> - `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
+> - `npm run build:prod` in `TrainMindFront` → build succeeded
+> - `./node_modules/.bin/vue-tsc --noEmit` in `TrainMindFront` → advisory failure from existing project-level Vue typings/HeaderNotice/UserInfo issues
+
+**Why:** Phase 3 changes affect AI retrieval quality, Java persistence, and Vue chat UX. Verification must cover all three layers.
+
+**Implementation:** Run focused AI tests, full AI tests, Java compile, and front-end production build. `vue-tsc --noEmit` remains useful as advisory until existing project-level type issues are cleaned up.
+
+**Commands:**
 ```bash
-uv run python -c "from app.gateway.llm_client import LlmClient; print(dir(LlmClient))"
-```
-Expected: includes `chat_stream`
-
-- [ ] **Step 2: Implement stream endpoint with real token-by-token SSE**
-
-Replace the stub in `app/api/internal/v1/qa.py`:
-
-```python
-import json
-from collections.abc import AsyncIterator
-
-from fastapi.responses import StreamingResponse
-
-from app.gateway.llm_client import LlmClient
-from app.services.rag import _build_rag_prompt, _MIN_SCORE_THRESHOLD
-
-
-async def _stream_events(req: QaAnswerRequest, session: AsyncSession) -> AsyncIterator[str]:
-    """Yield SSE events for streaming Q&A. Token by token."""
-    from app.services.retrieval import hybrid_retrieve
-
-    # Step 1: Query rewrite + retrieval (synchronous)
-    try:
-        _, fused, log_ref = await hybrid_retrieve(
-            session,
-            question=req.question,
-            kb_version_id=req.kb_version_id,
-            course_id=req.course_id,
-        )
-    except Exception as exc:
-        yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    # Step 2: Load chunk text into fused results
-    fused_with_text = []
-    if fused:
-        from sqlalchemy import select as sa_select
-        from app.models.kb import KnowledgeChunk
-
-        stmt = sa_select(
-            KnowledgeChunk.id, KnowledgeChunk.chunk_text,
-            KnowledgeChunk.source_file, KnowledgeChunk.page_start,
-            KnowledgeChunk.page_end,
-        ).where(KnowledgeChunk.id.in_([r["chunk_id"] for r in fused]))
-        result = await session.execute(stmt)
-        chunk_map = {row[0]: row for row in result.fetchall()}
-
-        for r in fused:
-            row = chunk_map.get(r["chunk_id"])
-            if row:
-                r["text"] = row[1]
-                r["source_file"] = row[2]
-                r["page_start"] = row[3]
-                r["page_end"] = row[4]
-            else:
-                r["text"] = ""
-            fused_with_text.append(r)
-
-    # Step 3: Score threshold check (before streaming)
-    scores = [c.get("final_score", 0) for c in fused_with_text]
-    if max(scores) < _MIN_SCORE_THRESHOLD if fused_with_text else True:
-        yield f"data: {json.dumps({'reject_reason': 'low_score'}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    # Step 4: Build prompt and stream token by token
-    messages = _build_rag_prompt(req.question, fused_with_text)
-    llm = LlmClient()
-
-    answer_chunks: list[str] = []
-    try:
-        async for token in llm.chat_stream(messages):
-            answer_chunks.append(token)
-            yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
-    except Exception as exc:
-        yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    # Step 5: Send sources after the full answer
-    full_answer = "".join(answer_chunks)
-    sources = [
-        {"chunk_id": c.get("chunk_id"), "score": c.get("final_score")}
-        for c in fused_with_text
-    ]
-    yield f"data: {json.dumps({'answer': full_answer, 'sources': sources, 'retrieval_log_ref': log_ref}, ensure_ascii=False)}\n\n"
-    yield "data: [DONE]\n\n"
-
-
-@router.post("/answer/stream")
-async def answer_stream(
-    req: QaAnswerRequest,
-    session: AsyncSession = Depends(get_session),
-) -> StreamingResponse:
-    """SSE streaming Q&A (query rewrite → hybrid retrieval → LLM stream token-by-token → sources)."""
-    return StreamingResponse(
-        _stream_events(req, session),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_retrieval.py tests/test_retrieval_degradation.py tests/test_mmr.py tests/test_qa.py tests/test_rag_stream.py -q
+UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/ -q
+mvn -pl trainmind-admin -am -DskipTests compile
+./node_modules/.bin/vite build
 ```
 
-- [ ] **Step 3: Write test verifying SSE event content**
-
-`tests/test_rag_stream.py`:
-```python
-import json
-import pytest
-from unittest.mock import AsyncMock
-
-
-@pytest.mark.asyncio
-async def test_stream_events_yields_tokens(monkeypatch):
-    """SSE 事件流应逐 token 输出，最后输出 sources 和 DONE。"""
-    from app.api.internal.v1.qa import _stream_events
-    from app.schemas.qa import QaAnswerRequest
-
-    async def fake_retrieve(*a, **kw):
-        return "query", [], None
-
-    async def fake_chat_stream(*a, **kw):
-        yield "你好"
-        yield "世界"
-
-    monkeypatch.setattr("app.api.internal.v1.qa.hybrid_retrieve", fake_retrieve)
-    monkeypatch.setattr("app.api.internal.v1.qa.LlmClient.chat_stream", fake_chat_stream)
-
-    req = QaAnswerRequest(
-        user_id=1, course_id=1, kb_version_id=1,
-        session_id=1, message_id=1, question="test"
-    )
-
-    events = [e async for e in _stream_events(req, AsyncMock())]
-
-    # Token events
-    assert json.loads(events[0][6:]) == {"token": "你好"}
-    assert json.loads(events[1][6:]) == {"token": "世界"}
-    # Sources event
-    assert "answer" in json.loads(events[2][6:])
-    assert json.loads(events[2][6:])["answer"] == "你好世界"
-    # DONE
-    assert events[3] == "data: [DONE]\n\n"
-
-
-@pytest.mark.asyncio
-async def test_stream_returns_sse_content_type(monkeypatch):
-    """流式端点应返回 text/event-stream。"""
-    from app.api.internal.v1.qa import answer_stream
-    from app.schemas.qa import QaAnswerRequest
-
-    async def fake_retrieve(*a, **kw):
-        return "query", [], None
-
-    async def fake_chat_stream(*a, **kw):
-        yield "token"
-
-    monkeypatch.setattr("app.api.internal.v1.qa.hybrid_retrieve", fake_retrieve)
-    monkeypatch.setattr("app.api.internal.v1.qa.LlmClient.chat_stream", fake_chat_stream)
-
-    req = QaAnswerRequest(
-        user_id=1, course_id=1, kb_version_id=1,
-        session_id=1, message_id=1, question="test"
-    )
-
-    resp = await answer_stream(req, AsyncMock())
-    assert resp.media_type == "text/event-stream"
-```
+**Acceptance:** All focused and full AI tests pass; Java compile succeeds; Vue production build succeeds; any existing `vue-tsc` advisory failures are documented separately.
 
 ---
 
-## Task 3.2: Query rewrite enhancement
+## Task 3.11: QA observability metrics contract
+
+> **Status:** ✅ Completed
+
+**Why:** Phase 3 can now answer questions, but optimization needs evidence: per-question Top3 retrieval, final citations, quality warnings, retrieval channel, and latency. Without a stable metrics contract, later pages and SQL analysis will drift.
+
+**Implementation:** Define the QA trace and aggregate metric contract before code changes. Keep complete question/answer text in Java `qa_message`; AI logs store weak references and technical signals. Reuse `qa_retrieval_log` for Top3 retrieval rows, `model_call_log` for model signals, and add one lightweight answer-level observation record for quality and latency summary.
+
+**Metrics contract:**
+- Trace ids: `course_id`, `session_id`, `message_id`, `knowledge_base_version_id`, `retrieval_log_ref`, `request_id`
+- Query: `raw_query`, `normalized_query`, `language`, `keyword_query`, `semantic_query`
+- Retrieval: `retrieval_channel`, `top_score`, Top3 `chunk_id/document_id/page/section/final_score/used_in_prompt`
+- Answer quality: `answer_status`, `reject_reason`, `warnings`, `source_count`, `cited_source_count`, `invalid_citation_count`, `weak_citation_count`, `no_valid_citation`
+- Latency: `retrieval_latency_ms`, `llm_latency_ms`, `first_token_ms`, `total_latency_ms`
+- Model: `provider`, `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `success`, `error_code`
 
 **Files:**
-- Create: `app/services/retrieval/synonyms.json`
-- Modify: `app/services/retrieval/__init__.py`
+- Modify: `ai-service/docs/superpowers/specs/2026-06-22-ai-service-roadmap-design.md`
+- Modify: `ai-service/docs/superpowers/plans/2026-06-22-ai-service-implementation-plan.md`
 
-- [ ] **Step 1: Create synonym dictionary**
+**Acceptance:** The design document can answer how to trace one QA message and how to aggregate course-level QA quality without adding raw assistant answer text to AI logs.
 
-`app/services/retrieval/synonyms.json`:
-```json
-{
-  "ML": ["机器学习"],
-  "AI": ["人工智能"],
-  "NLP": ["自然语言处理"],
-  "DL": ["深度学习"],
-  "CNN": ["卷积神经网络"],
-  "RNN": ["循环神经网络"],
-  "LSTM": ["长短期记忆网络"],
-  "SVM": ["支持向量机"],
-  "PCA": ["主成分分析"],
-  "API": ["接口"],
-  "DB": ["数据库"]
-}
-```
+**Completed:** Added the Phase 3.11-3.15 QA observability design to the roadmap. The contract now covers per-message trace ids, query signals, retrieval Top3, answer quality warnings, latency split, and model-call signals while keeping raw question/answer text in Java `qa_message`.
 
-- [ ] **Step 2: Enhance query_rewrite**
+## Task 3.12: AI QA observation schema and instrumentation
 
-Modify `query_rewrite` in `app/services/retrieval/__init__.py`:
+> **Status:** ✅ Completed
 
-```python
-import json
-import os
-import re
+**Why:** Current `qa_retrieval_log` can reconstruct Top results, and `model_call_log` has latency/token columns, but QA paths do not consistently write latency, token usage, or answer-level quality signals.
 
-_SYNONYMS: dict[str, list[str]] | None = None
-
-def _load_synonyms() -> dict[str, list[str]]:
-    global _SYNONYMS
-    if _SYNONYMS is None:
-        path = os.path.join(os.path.dirname(__file__), "synonyms.json")
-        try:
-            with open(path, encoding="utf-8") as f:
-                _SYNONYMS = json.load(f)
-        except FileNotFoundError:
-            _SYNONYMS = {}
-    return _SYNONYMS
-
-
-def _expand_synonyms(text: str) -> str:
-    """Expand known acronyms/abbreviations with their full forms."""
-    syns = _load_synonyms()
-    words = text.split()
-    expanded = []
-    for w in words:
-        expanded.append(w)
-        if w.upper() in syns:
-            expanded.extend(syns[w.upper()])
-    return " ".join(expanded)
-
-
-def _detect_language(text: str) -> str:
-    """Detect if text is zh, en, or mixed."""
-    has_zh = bool(re.search(r"[一-鿿]", text))
-    has_en = bool(re.search(r"[a-zA-Z]{2,}", text))
-    if has_zh and has_en:
-        return "mixed"
-    if has_zh:
-        return "zh"
-    return "en"
-
-
-async def query_rewrite(raw: str) -> dict:
-    """Query rewrite with synonym expansion and language-aware tokenization."""
-    normalized = raw.strip().replace("\n", " ")
-    lang = _detect_language(normalized)
-
-    # Synonym expansion
-    expanded = _expand_synonyms(normalized)
-
-    if lang in ("zh", "mixed"):
-        words = list(jieba.cut(expanded))
-        keyword_query = " ".join(w for w in words if len(w) > 1)
-    else:
-        # English: lowercase space-split
-        keyword_query = " ".join(
-            w.lower() for w in expanded.split() if len(w) > 2
-        )
-
-    return {
-        "raw_query": raw,
-        "normalized_query": normalized,
-        "keyword_query": keyword_query,
-        "semantic_query": normalized,
-        "language": lang,
-    }
-```
-
----
-
-## Task 3.3: Multi-turn conversation context
+**Implementation:** Add a lightweight AI observation model/table, for example `ai.qa_answer_observation`, weakly linked by `message_id`, `session_id`, `course_id`, and `retrieval_log_ref`. Instrument both sync and SSE QA paths to record retrieval latency, LLM latency, first token latency for SSE, total latency, answer status, warnings, citation counts, and top score. Fill `model_call_log.latency_ms` for sync and streaming calls; leave token usage null when the provider does not return usage.
 
 **Files:**
-- Modify: `app/services/rag/__init__.py`
+- Add: `ai-service/alembic/versions/<next>_qa_answer_observation.py`
+- Modify: `ai-service/app/models/logs.py`
+- Modify: `ai-service/app/repositories/log_repo.py`
+- Modify: `ai-service/app/services/retrieval/__init__.py`
+- Modify: `ai-service/app/services/rag/__init__.py`
+- Modify: `ai-service/app/api/internal/v1/qa.py`
+- Test: `ai-service/tests/test_qa_observability.py`
 
-- [ ] **Step 1: Add history loading to qa_answer**
+**Acceptance:** Sync QA, stream QA, low-score refusal, and LLM error paths all write observation records; observation failure must not break the user-facing QA response.
 
-In `app/services/rag/__init__.py`:
-```python
-from app.repositories.log_repo import QaRetrievalLogRepo
+**Completed:** Added `ai.qa_answer_observation`, extended `qa_retrieval_log` with `language`, added the SQLAlchemy model/repository, and instrumented sync/SSE QA paths with best-effort observation writes. Retrieval latency, LLM latency, first-token latency, total latency, status, warnings, citation counts, top score, and weak references are now recorded.
 
+**Verification:**
+- `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/ -q` → 71 passed, 1 Starlette deprecation warning
+- `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app tests/test_qa_observability.py` → All checks passed
+- `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app` → Success, no issues found
 
-async def _load_conversation_history(
-    session: AsyncSession,
-    message_id: int | None,
-    max_turns: int = 3,
-) -> list[dict]:
-    """Load recent Q&A history from qa_retrieval_log for multi-turn context."""
-    if message_id is None:
-        return []
+## Task 3.13: QA observability query API in Java/RuoYi
 
-    from sqlalchemy import select as sa_select
-    from app.models.logs import QaRetrievalLog, ModelCallLog
+> **Status:** ✅ Completed
 
-    # Get current message's session_id from retrieval log
-    repo = QaRetrievalLogRepo(session)
-    stmt = (
-        sa_select(QaRetrievalLog)
-        .where(QaRetrievalLog.message_id == message_id)
-        .order_by(QaRetrievalLog.id.desc())
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    current = result.scalar_one_or_none()
-    if current is None or current.session_id is None:
-        return []
+**Why:** AI logs are useful for engineers, but teachers/operators need course-scoped APIs that apply tenant and course permissions. Java owns business access control and already stores `qa_message` and `qa_message_citation`.
 
-    # Find recent messages in the same session (excluding current)
-    stmt = (
-        sa_select(QaRetrievalLog)
-        .where(
-            QaRetrievalLog.session_id == current.session_id,
-            QaRetrievalLog.message_id < message_id,
-        )
-        .order_by(QaRetrievalLog.id.desc())
-        .limit(max_turns)
-    )
-    result = await session.execute(stmt)
-    logs = result.scalars().all()
-
-    # For each retrieval log, find the corresponding model call to get the answer
-    history: list[dict] = []
-    for log in reversed(logs):
-        m_stmt = sa_select(ModelCallLog).where(
-            ModelCallLog.message_id == log.message_id,
-            ModelCallLog.scenario == "qa",
-            ModelCallLog.success.is_(True),
-        ).order_by(ModelCallLog.id.desc()).limit(1)
-        m_result = await session.execute(m_stmt)
-        model_log = m_result.scalar_one_or_none()
-
-        history.append({
-            "role": "user",
-            "content": log.raw_query or "",
-        })
-        # Note: model log doesn't store the actual answer text — the caller (Java)
-        # holds the full Q&A. Here we can only reconstruct partial context.
-        # The answer text is not available from our logs.
-
-    return history
-```
-
----
-
-## Task 3.4: Citation validation
+**Implementation:** Add course QA observability DTOs, mapper queries, service methods, and controller endpoints. The list endpoint returns per-message summary with question, answer status, citation count, top score, retrieval channel, warnings, and latency. The detail endpoint joins Java message/citation data with AI observation and Top3 retrieval rows.
 
 **Files:**
-- Modify: `app/services/rag/__init__.py`
+- Add/Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/domain/dto/`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/mapper/StudentQaMapper.java`
+- Modify: `TrainMindBackend/trainmind-system/src/main/resources/mapper/system/StudentQaMapper.xml`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/service/IStudentQaService.java`
+- Modify: `TrainMindBackend/trainmind-system/src/main/java/com/hezal/system/service/impl/StudentQaServiceImpl.java`
+- Modify: `TrainMindBackend/trainmind-admin/src/main/java/com/hezal/web/controller/student/StudentQaController.java` or add an admin/teacher course AI controller
 
-- [ ] **Step 1: Add citation validation**
+**Acceptance:** A teacher/admin can query a course QA list and open one QA detail to see Top3 retrieval sources, final citations, warnings, and latency split; access remains course-scoped.
 
-Add to `app/services/rag/__init__.py`:
-```python
-import re
+**Completed:** Added course-scoped QA observability DTOs, mapper queries, service methods, and controller endpoints under `/course/{courseId}/qa-observability`. The API returns course summary metrics, paged QA observations, and message detail with Top3 retrieval rows and final citations. Access is guarded with course management access plus existing `course:course:query` permission.
 
-_CITATION_RE = re.compile(r"\[来源:(\d+)\]")
+**Verification:**
+- `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
 
+## Task 3.14: Vue QA observability page
 
-def validate_citations(answer: str, context_chunks: list[dict]) -> tuple[str, list[dict], list[str]]:
-    """Validate [来源:N] citations in LLM answer.
+> **Status:** ✅ Completed
 
-    Returns:
-        (cleaned_answer, validated_sources, warnings)
-    """
-    warnings = []
-    valid_indices = set(range(1, len(context_chunks) + 1))
-    seen = set()
+**Why:** If QA observability only exists in database tables and APIs, non-technical users still cannot inspect poor answers or validate whether retrieval quality is improving.
 
-    def _replace_citation(m: re.Match) -> str:
-        idx = int(m.group(1))
-        if idx in valid_indices and idx not in seen:
-            seen.add(idx)
-            return m.group(0)
-        warnings.append(f"invalid citation [{m.group(0)}]")
-        return ""
-
-    cleaned = _CITATION_RE.sub(_replace_citation, answer)
-
-    # Check for low-score citations
-    for idx in seen:
-        chunk = context_chunks[idx - 1]
-        score = chunk.get("final_score", 1.0)
-        if score < 0.2:
-            warnings.append(f"weak citation [来源:{idx}] (score={score:.3f})")
-
-    sources = [
-        {
-            "chunk_id": c.get("chunk_id"),
-            "source_index": i + 1 if (i + 1) in seen else None,
-            "score": c.get("final_score"),
-            "invalid": (i + 1) not in seen,
-        }
-        for i, c in enumerate(context_chunks)
-    ]
-
-    return cleaned, sources, warnings
-```
-
----
-
-## Task 3.5: Retrieval degradation strategy
+**Implementation:** Add a course-level “AI 问答观测” tab/page. Show metric cards for question count, insufficient-evidence rate, no-valid-citation rate, weak-citation rate, retrieval fallback rate, and p95 total latency. Show a filterable QA table and a detail drawer with question/answer, Top3 retrieval, final citations, warnings, and latency split. Keep the first version utilitarian; no complex charts or exports.
 
 **Files:**
-- Modify: `app/services/retrieval/__init__.py`
+- Modify/Add: `TrainMindFront/src/api/`
+- Modify/Add: `TrainMindFront/src/types/api/`
+- Add/Modify: course management or course-space observability view
 
-- [ ] **Step 1: Wrap hybrid_retrieve with degradation**
+**Acceptance:** A teacher/operator can locate a specific poor answer from the page and inspect its retrieval Top3, final citation comparison, warnings, and latency without querying the database.
 
-Wrap the vector search call in `hybrid_retrieve`:
+**Completed:** Added an “AI 问答观测” tab to the course detail page with metric cards, filters, a paged QA table, and a detail drawer showing question/answer, quality signals, latency split, Top3 retrieval sources, and final citations.
 
-```python
-async def hybrid_retrieve(
-    session: AsyncSession,
-    question: str,
-    kb_version_id: int,
-    course_id: int | None = None,
-    top_k: int | None = None,
-) -> tuple[str, list[dict], int | None]:
-    """Hybrid retrieval with degradation handling."""
-    rewritten = await query_rewrite(question)
-    kw_query = rewritten["keyword_query"]
-    semantic_query = rewritten["semantic_query"]
+**Verification:**
+- `npm run build:prod` in `TrainMindFront` → build succeeded
+- `./node_modules/.bin/vue-tsc --noEmit` in `TrainMindFront` → advisory failure from existing project-level Vue typing/HeaderNotice/UserInfo issues; no new QA observability type errors remained after fixing the new watcher parameter type
 
-    config_repo = RetrievalStrategyConfigRepo(session)
-    strategy = await config_repo.get_default()
-    v_top_k = top_k or (strategy.vector_top_k if strategy else 20)
-    kw_top_k = top_k or (strategy.keyword_top_k if strategy else 20)
-    final_top_k = top_k or (strategy.final_top_k if strategy else 5)
-    v_weight = float(strategy.vector_weight) if strategy else 0.6
-    kw_weight = float(strategy.keyword_weight) if strategy else 0.3
+## Task 3.15: QA observability verification
 
-    emb_idx_repo = EmbeddingIndexVersionRepo(session)
-    emb_idx = await emb_idx_repo.get_latest_by_version(kb_version_id)
+> **Status:** ✅ Completed
 
-    vector_hits: list[VectorHit] = []
-    keyword_hits: list[tuple[int, float]] = []
-    retrieval_channel = "hybrid"
+**Why:** Observability is only useful if the records are trustworthy and the page/API agree with the logged data.
 
-    # Vector search (degradable)
-    if emb_idx:
-        try:
-            filter_dict = {"course_id": course_id} if course_id else None
-            vector_hits = await _vector_search(
-                session, emb_idx.id, semantic_query, v_top_k, filter_dict
-            )
-        except Exception:  # noqa: BLE001
-            retrieval_channel = "keyword_only"
+**Implementation:** Run AI tests for observation writes, Java compile for new API/mapper/DTOs, front-end production build for the page, and a SQL/API smoke check over seeded or existing QA data.
 
-    # Keyword search (degradable)
-    try:
-        keyword_hits = await _keyword_search(
-            session, kw_query, kb_version_id, kw_top_k
-        )
-    except Exception:  # noqa: BLE001
-        if retrieval_channel == "keyword_only":
-            retrieval_channel = "empty"
-
-    # Fusion
-    if retrieval_channel == "empty":
-        fused = []
-    else:
-        fused = _hybrid_fusion(
-            vector_hits, keyword_hits, v_weight, kw_weight, final_top_k
-        )
-
-    # (rest of function unchanged: chunk text loading + logging)
-    ...
-```
-
----
-
-## Task 3.6: MMR diversity
-
-**Files:**
-- Modify: `app/services/retrieval/__init__.py`
-
-- [ ] **Step 1: Implement MMR**
-
-```python
-import math
-
-
-def _cosine_sim(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
-
-
-def mmr_diversify(
-    items: list[dict],
-    embeddings: list[list[float]],
-    lambda_param: float = 0.5,
-    top_k: int = 5,
-) -> list[dict]:
-    """Maximum Marginal Relevance to diversify retrieval results.
-
-    Args:
-        items: list of dicts with 'chunk_id' and 'final_score'
-        embeddings: corresponding embedding vectors
-        lambda_param: 1.0 = max relevance, 0.0 = max diversity
-        top_k: max results to return
-
-    Returns:
-        Re-ranked items with diverse coverage.
-    """
-    if not items or len(items) <= 1:
-        return items[:top_k]
-
-    selected: list[int] = []
-    remaining = list(range(len(items)))
-
-    while len(selected) < min(top_k, len(items)):
-        mmr_scores = {}
-        for i in remaining:
-            rel_score = items[i].get("final_score", 0)
-
-            if selected:
-                max_sim = max(
-                    _cosine_sim(embeddings[i], embeddings[j])
-                    for j in selected
-                )
-            else:
-                max_sim = 0
-
-            mmr = lambda_param * rel_score - (1 - lambda_param) * max_sim
-            mmr_scores[i] = mmr
-
-        best = max(mmr_scores, key=mmr_scores.get)
-        selected.append(best)
-        remaining.remove(best)
-
-    return [items[i] for i in selected]
-```
-
----
-
-## Task 3.7: RAG prompt configuration from DB
-
-**Files:**
-- Modify: `app/services/rag/__init__.py`
-
-- [ ] **Step 1: Load prompt from repository**
-
-```python
-from app.repositories.config_repo import PromptTemplateRepo
-
-def _build_rag_prompt(
-    question: str,
-    context_chunks: list[dict],
-    prompt_template: str | None = None,
-    temperature: float | None = None,
-) -> list[dict]:
-    """Build RAG prompt, using custom template if provided."""
-    if prompt_template:
-        system = prompt_template
-    else:
-        system = (
-            "你是一个专业的知识助教。请基于提供的参考资料，用中文回答用户问题。"
-            "回答要求：\n"
-            "1. 如果参考资料足够回答，请给出准确、完整的答案\n"
-            "2. 如果参考资料不足以回答，请说明无法回答\n"
-            "3. 在答案末尾注明引用的资料编号，格式为「[来源:N]」\n"
-            "4. 不要编造信息\n"
-        )
-
-    context_parts = []
-    for i, chunk in enumerate(context_chunks):
-        ctx = f"[来源 {i + 1}]\n{chunk.get('text', '')}"
-        if chunk.get("source_file"):
-            ctx += f"\n(文件: {chunk['source_file']})"
-        context_parts.append(ctx)
-
-    context_block = "\n\n---\n\n".join(context_parts)
-    user_prompt = f"参考资料：\n{context_block}\n\n问题：{question}"
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_prompt},
-    ]
-
-
-async def qa_answer(
-    session: AsyncSession,
-    question: str,
-    context_chunks: list[dict],
-    message_id: int | None = None,
-    prompt_version: str | None = None,
-) -> dict:
-    """RAG Q&A with configurable prompt from DB."""
-    # Load prompt template from DB
-    prompt_repo = PromptTemplateRepo(session)
-    templates = await prompt_repo.get_by_scenario("qa")
-    selected_template = None
-    temperature = 0.7
-
-    if prompt_version:
-        selected_template = next(
-            (t for t in templates if t.prompt_version == prompt_version),
-            None
-        )
-    elif templates:
-        selected_template = templates[0]
-
-    if selected_template:
-        temperature = 0.7  # Could be extended with a temperature column
-
-    # Score threshold check
-    scores = [c.get("final_score", 0) for c in context_chunks]
-    if max(scores) < _MIN_SCORE_THRESHOLD:
-        return {
-            "answer": "",
-            "reject_reason": "low_score",
-            "model": settings.llm_model,
-        }
-
-    template_content = selected_template.prompt_content if selected_template else None
-    messages = _build_rag_prompt(question, context_chunks, template_content)
-
-    llm = LlmClient()
-    log_repo = ModelCallLogRepo(session)
-
-    try:
-        answer = await llm.chat(messages, temperature=temperature)
-        # ... citation validation ...
-        await log_repo.log_call(scenario="qa", ...)
-        ...
-```
-
----
-
-## Task 3.8: Phase 3 tests
-
-- [ ] **Step 1: Run test suite**
-
+**Commands:**
 ```bash
-uv run pytest tests/test_rag_stream.py tests/test_retrieval.py tests/test_mmr.py -v
+UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/test_qa.py tests/test_rag_stream.py tests/test_qa_observability.py -q
+UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app tests/test_qa_observability.py
+UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app
+mvn -pl trainmind-admin -am -DskipTests compile
+npm run build:prod
 ```
 
-Expected: all PASS
+**Acceptance:** AI observation tests pass; Java compile succeeds; Vue build succeeds; sample QA detail shows the same Top3 and citations as database logs.
+
+**Completed:** Added focused AI tests for observation writes and stream success logging, compiled the Java API/mapper/service changes, and built the Vue production bundle. The SQL/API smoke check remains dependent on applying migration `0004_qa_answer_observation.py` and generating real QA data in the target environment.
+
+**Verification:**
+- `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/ -q` → 71 passed, 1 Starlette deprecation warning
+- `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run ruff check app tests/test_qa_observability.py` → All checks passed
+- `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run mypy app` → Success, no issues found
+- `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
+- `npm run build:prod` in `TrainMindFront` → build succeeded
+- `./node_modules/.bin/vue-tsc --noEmit` in `TrainMindFront` → advisory failure from existing project-level Vue typing/HeaderNotice/UserInfo issues
 
 ---
 

@@ -78,7 +78,10 @@
                 <div v-else-if="message.status === 'service_unavailable'" class="status-label status-label--error">
                   <el-icon><CircleClose /></el-icon> 问答服务暂时不可用
                 </div>
-                <p>{{ message.content }}</p>
+                <p v-if="message.content">{{ message.content }}</p>
+                <div v-else-if="message.role === 'assistant' && message.status === 'pending'" class="thinking thinking--inline">
+                  <i></i><i></i><i></i><span>正在检索课程资料</span>
+                </div>
                 <el-button
                   v-if="message.status === 'service_unavailable'"
                   type="danger"
@@ -110,10 +113,6 @@
             </div>
           </article>
 
-          <article v-if="sending" class="message message--assistant">
-            <div class="message-avatar">AI</div>
-            <div class="thinking"><i></i><i></i><i></i><span>正在检索课程资料</span></div>
-          </article>
         </div>
 
         <footer class="composer">
@@ -146,9 +145,14 @@ import {
   ArrowRight, ChatLineRound, CircleClose, Delete, Plus, Promotion, Refresh, Warning
 } from '@element-plus/icons-vue'
 import {
-  askCourseQuestion, createQaSession, deleteQaSession, listQaMessages, listQaSessions
+  askCourseQuestion,
+  createQaSession,
+  deleteQaSession,
+  listQaMessages,
+  listQaSessions,
+  streamCourseQuestion
 } from '@/api/student'
-import type { StudentQaCitation, StudentQaMessage, StudentQaSession } from '@/types'
+import type { StudentQaCitation, StudentQaMessage, StudentQaSession, StudentQaStreamEvent } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -162,6 +166,7 @@ const activeSessionId = ref<number>()
 const question = ref('')
 const messageScroller = ref<HTMLElement>()
 let loadSequence = 0
+let activeStreamAbort: AbortController | null = null
 
 const suggestions = [
   '这门课程主要包含哪些学习内容？',
@@ -243,23 +248,87 @@ async function sendQuestion(value = question.value) {
   if (!normalized || sending.value) return
   sending.value = true
   question.value = ''
+  let assistantMessage: StudentQaMessage | undefined
+  let hasStreamToken = false
+  let hasFinalEvent = false
   try {
     const sessionId = await ensureSession()
     const optimisticMessage: StudentQaMessage = {
       id: -Date.now(), sessionId, courseId: courseId.value, knowledgeBaseVersionId: 0,
       role: 'user', content: normalized, status: 'completed', citations: []
     }
+    assistantMessage = {
+      id: optimisticMessage.id - 1, sessionId, courseId: courseId.value, knowledgeBaseVersionId: 0,
+      role: 'assistant', content: '', status: 'pending', citations: []
+    }
     messages.value.push(optimisticMessage)
+    messages.value.push(assistantMessage)
     scrollToBottom()
-    const response = await askCourseQuestion(courseId.value, sessionId, normalized)
-    if (response.data) messages.value.push(response.data)
+
+    activeStreamAbort = new AbortController()
+    await streamCourseQuestion(courseId.value, sessionId, normalized, {
+      signal: activeStreamAbort.signal,
+      onEvent: (event: StudentQaStreamEvent) => {
+        if (!assistantMessage) return
+        if (event.event === 'token') {
+          hasStreamToken = true
+          assistantMessage.content += event.data.token || ''
+          scrollToBottom()
+        } else if (event.event === 'sources') {
+          hasFinalEvent = true
+          assistantMessage.content = event.data.answer || assistantMessage.content
+          assistantMessage.status = event.data.answerStatus || 'completed'
+          assistantMessage.knowledgeBaseVersionId = event.data.knowledgeBaseVersionId || 0
+          assistantMessage.rejectReason = event.data.rejectReason
+          assistantMessage.retrievalLogRef = event.data.retrievalLogRef
+        } else if (event.event === 'error') {
+          assistantMessage.status = 'service_unavailable'
+          assistantMessage.content = event.data.error || '问答服务暂时不可用，请稍后重试。'
+        }
+      }
+    })
+    if (hasFinalEvent) await reloadActiveMessages(sessionId)
+    await loadSessions()
+    scrollToBottom()
+  } catch (error) {
+    if (activeStreamAbort?.signal.aborted) return
+    if (!hasStreamToken && !hasFinalEvent) {
+      await fallbackAsk(normalized, assistantMessage)
+      return
+    }
+    question.value = normalized
+    ElMessage.error('问题发送失败，内容已保留，请重试')
+  } finally {
+    activeStreamAbort = null
+    sending.value = false
+  }
+}
+
+async function reloadActiveMessages(sessionId: number) {
+  const response = await listQaMessages(courseId.value, sessionId)
+  messages.value = response.data || messages.value
+}
+
+async function fallbackAsk(normalized: string, assistantMessage?: StudentQaMessage) {
+  if (!activeSessionId.value) throw new Error('会话不存在')
+  try {
+    const response = await askCourseQuestion(courseId.value, activeSessionId.value, normalized)
+    if (response.data) {
+      if (assistantMessage) {
+        Object.assign(assistantMessage, response.data)
+      } else {
+        messages.value.push(response.data)
+      }
+    }
     await loadSessions()
     scrollToBottom()
   } catch {
     question.value = normalized
+    if (assistantMessage) {
+      assistantMessage.status = 'service_unavailable'
+      assistantMessage.content = '问题发送失败，内容已保留，请重试。'
+    }
     ElMessage.error('问题发送失败，内容已保留，请重试')
-  } finally {
-    sending.value = false
   }
 }
 
@@ -305,12 +374,17 @@ function scrollToBottom() {
 }
 
 watch(() => route.params.courseId, () => {
+  activeStreamAbort?.abort()
   loadSequence++
   sessions.value = []
   messages.value = []
   activeSessionId.value = undefined
   loadSessions()
 }, { immediate: true })
+
+onBeforeUnmount(() => {
+  activeStreamAbort?.abort()
+})
 </script>
 
 <style scoped lang="scss">
@@ -366,6 +440,7 @@ watch(() => route.params.courseId, () => {
 .citation-main strong { font-size: 12px; }
 .citation-main small { margin-top: 3px; color: #8a96a6; font-size: 11px; }
 .thinking { padding: 10px 13px; display: flex; align-items: center; gap: 5px; color: #798698; border: 1px solid #e0e6ed; border-radius: 4px 13px 13px; background: #fff; font-size: 12px; }
+.thinking--inline { padding: 0; border: 0; border-radius: 0; }
 .thinking i { width: 5px; height: 5px; border-radius: 50%; background: #6884a0; animation: pulse 1.1s infinite; }
 .thinking i:nth-child(2) { animation-delay: .15s; }.thinking i:nth-child(3) { animation-delay: .3s; }.thinking span { margin-left: 5px; }
 .composer { padding: 14px 18px; border-top: 1px solid #e7ebf0; background: #fff; }

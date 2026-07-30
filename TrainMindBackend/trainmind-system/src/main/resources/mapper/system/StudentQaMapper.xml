@@ -29,6 +29,84 @@
         <result property="quote" column="quote"/><result property="score" column="score"/>
         <result property="rankNo" column="rank_no"/><result property="createTime" column="create_time"/>
     </resultMap>
+    <resultMap id="QaObservationItemResult" type="com.hezal.system.domain.dto.QaObservationItem">
+        <id property="messageId" column="message_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="question" column="question"/>
+        <result property="answerPreview" column="answer_preview"/>
+        <result property="answerStatus" column="answer_status"/>
+        <result property="rejectReason" column="reject_reason"/>
+        <result property="retrievalLogRef" column="retrieval_log_ref"/>
+        <result property="retrievalChannel" column="retrieval_channel"/>
+        <result property="warningsJson" column="warnings_json"/>
+        <result property="citationCount" column="citation_count"/>
+        <result property="topScore" column="top_score"/>
+        <result property="totalLatencyMs" column="total_latency_ms"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+    <resultMap id="QaObservationSummaryResult" type="com.hezal.system.domain.dto.QaObservationSummary">
+        <result property="questionCount" column="question_count"/>
+        <result property="insufficientEvidenceCount" column="insufficient_evidence_count"/>
+        <result property="noValidCitationCount" column="no_valid_citation_count"/>
+        <result property="weakCitationCount" column="weak_citation_count"/>
+        <result property="fallbackCount" column="fallback_count"/>
+        <result property="insufficientEvidenceRate" column="insufficient_evidence_rate"/>
+        <result property="noValidCitationRate" column="no_valid_citation_rate"/>
+        <result property="weakCitationRate" column="weak_citation_rate"/>
+        <result property="fallbackRate" column="fallback_rate"/>
+        <result property="p95TotalLatencyMs" column="p95_total_latency_ms"/>
+    </resultMap>
+    <resultMap id="QaObservationDetailResult" type="com.hezal.system.domain.dto.QaObservationDetail">
+        <id property="messageId" column="message_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="question" column="question"/>
+        <result property="answer" column="answer"/>
+        <result property="answerStatus" column="answer_status"/>
+        <result property="rejectReason" column="reject_reason"/>
+        <result property="retrievalLogRef" column="retrieval_log_ref"/>
+        <result property="retrievalChannel" column="retrieval_channel"/>
+        <result property="warningsJson" column="warnings_json"/>
+        <result property="retrievalLatencyMs" column="retrieval_latency_ms"/>
+        <result property="llmLatencyMs" column="llm_latency_ms"/>
+        <result property="firstTokenMs" column="first_token_ms"/>
+        <result property="totalLatencyMs" column="total_latency_ms"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+    <resultMap id="QaRetrievalTopSourceResult" type="com.hezal.system.domain.dto.QaRetrievalTopSource">
+        <result property="chunkId" column="chunk_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="documentVersionId" column="document_version_id"/>
+        <result property="documentTitle" column="document_title"/>
+        <result property="sourceFile" column="source_file"/>
+        <result property="pageStart" column="page_start"/>
+        <result property="pageEnd" column="page_end"/>
+        <result property="sectionTitle" column="section_title"/>
+        <result property="score" column="score"/>
+        <result property="rankNo" column="rank_no"/>
+        <result property="usedInPrompt" column="used_in_prompt"/>
+        <result property="cited" column="cited"/>
+    </resultMap>
+    <sql id="QaObservationFilters">
+        <if test="query != null">
+            <if test="query.answerStatus != null and query.answerStatus != ''">
+                and o.answer_status = #{query.answerStatus}
+            </if>
+            <if test="query.retrievalChannel != null and query.retrievalChannel != ''">
+                and o.retrieval_channel = #{query.retrievalChannel}
+            </if>
+            <if test="query.warningType != null and query.warningType != ''">
+                and cast(o.warnings as text) like concat('%', #{query.warningType}, '%')
+            </if>
+            <if test="query.beginTime != null and query.beginTime != ''">
+                and o.created_at &gt;= cast(#{query.beginTime} as timestamp)
+            </if>
+            <if test="query.endTime != null and query.endTime != ''">
+                and o.created_at &lt;= cast(#{query.endTime} as timestamp)
+            </if>
+        </if>
+    </sql>
     <select id="selectSessions" resultMap="SessionResult">
         select * from qa_session where tenant_id=#{tenantId} and course_id=#{courseId}
           and user_id=#{userId} and del_flag='0' and status='active'
@@ -100,5 +178,122 @@
         join qa_message m on m.id=c.message_id and m.tenant_id=c.tenant_id and m.del_flag='0'
         where c.tenant_id=#{tenantId} and c.message_id=#{messageId} and c.id=#{citationId}
           and c.del_flag='0'
+    </select>
+    <select id="selectQaObservationSummary" resultMap="QaObservationSummaryResult">
+        select
+          count(*)::bigint as question_count,
+          count(*) filter (where o.answer_status = 'insufficient_evidence')::bigint
+            as insufficient_evidence_count,
+          count(*) filter (where o.no_valid_citation is true)::bigint as no_valid_citation_count,
+          count(*) filter (where coalesce(o.weak_citation_count, 0) &gt; 0)::bigint
+            as weak_citation_count,
+          count(*) filter (where o.retrieval_channel in ('keyword_only', 'vector_only', 'empty'))::bigint
+            as fallback_count,
+          case when count(*) = 0 then 0
+            else round((count(*) filter (where o.answer_status = 'insufficient_evidence'))::numeric
+              / count(*), 4) end as insufficient_evidence_rate,
+          case when count(*) = 0 then 0
+            else round((count(*) filter (where o.no_valid_citation is true))::numeric
+              / count(*), 4) end as no_valid_citation_rate,
+          case when count(*) = 0 then 0
+            else round((count(*) filter (where coalesce(o.weak_citation_count, 0) &gt; 0))::numeric
+              / count(*), 4) end as weak_citation_rate,
+          case when count(*) = 0 then 0
+            else round((count(*) filter (where o.retrieval_channel in ('keyword_only', 'vector_only', 'empty')))::numeric
+              / count(*), 4) end as fallback_rate,
+          cast(percentile_cont(0.95) within group (order by o.total_latency_ms)
+            filter (where o.total_latency_ms is not null) as int) as p95_total_latency_ms
+        from ai.qa_answer_observation o
+        join qa_message m on m.id = o.message_id and m.del_flag = '0'
+        where m.tenant_id = #{tenantId} and m.course_id = #{courseId} and m.role = 'assistant'
+        <include refid="QaObservationFilters"/>
+    </select>
+    <select id="selectQaObservationList" resultMap="QaObservationItemResult">
+        select
+          m.id as message_id,
+          m.session_id,
+          m.user_id,
+          q.content as question,
+          left(m.content, 180) as answer_preview,
+          m.status as answer_status,
+          m.reject_reason,
+          m.retrieval_log_ref,
+          o.retrieval_channel,
+          coalesce(cast(o.warnings as text), '[]') as warnings_json,
+          coalesce(c.citation_count, 0) as citation_count,
+          o.top_score,
+          o.total_latency_ms,
+          m.create_time
+        from qa_message m
+        left join qa_message q on q.id = (
+          select max(q2.id) from qa_message q2
+          where q2.tenant_id = m.tenant_id and q2.session_id = m.session_id
+            and q2.role = 'user' and q2.id &lt; m.id and q2.del_flag = '0'
+        )
+        join ai.qa_answer_observation o on o.message_id = m.id
+        left join (
+          select tenant_id, message_id, count(*) as citation_count
+          from qa_message_citation where del_flag = '0'
+          group by tenant_id, message_id
+        ) c on c.tenant_id = m.tenant_id and c.message_id = m.id
+        where m.tenant_id = #{tenantId} and m.course_id = #{courseId}
+          and m.role = 'assistant' and m.del_flag = '0'
+        <include refid="QaObservationFilters"/>
+        order by m.create_time desc, m.id desc
+    </select>
+    <select id="selectQaObservationDetail" resultMap="QaObservationDetailResult">
+        select
+          m.id as message_id,
+          m.session_id,
+          m.user_id,
+          q.content as question,
+          m.content as answer,
+          m.status as answer_status,
+          m.reject_reason,
+          m.retrieval_log_ref,
+          o.retrieval_channel,
+          coalesce(cast(o.warnings as text), '[]') as warnings_json,
+          o.retrieval_latency_ms,
+          o.llm_latency_ms,
+          o.first_token_ms,
+          o.total_latency_ms,
+          m.create_time
+        from qa_message m
+        left join qa_message q on q.id = (
+          select max(q2.id) from qa_message q2
+          where q2.tenant_id = m.tenant_id and q2.session_id = m.session_id
+            and q2.role = 'user' and q2.id &lt; m.id and q2.del_flag = '0'
+        )
+        join ai.qa_answer_observation o on o.message_id = m.id
+        where m.tenant_id = #{tenantId} and m.course_id = #{courseId}
+          and m.id = #{messageId} and m.role = 'assistant' and m.del_flag = '0'
+    </select>
+    <select id="selectQaRetrievalTopSources" resultMap="QaRetrievalTopSourceResult">
+        select
+          l.chunk_id,
+          kc.document_id,
+          kc.document_version_id,
+          d.title as document_title,
+          kc.source_file,
+          kc.page_start,
+          kc.page_end,
+          coalesce(kc.metadata_json ->&gt; 'section_title', kc.metadata_json ->&gt; 'title') as section_title,
+          l.final_score as score,
+          l.rank_no,
+          l.used_in_prompt,
+          exists (
+            select 1 from qa_message_citation c
+            where c.tenant_id = #{tenantId} and c.message_id = #{messageId}
+              and c.chunk_id = l.chunk_id and c.del_flag = '0'
+          ) as cited
+        from ai.qa_retrieval_log l
+        left join ai.knowledge_chunk kc on kc.id = l.chunk_id
+        left join course_document d on d.id = kc.document_id and d.del_flag = '0'
+        where l.message_id = #{messageId} and l.rank_no &lt;= 3
+          and exists (
+            select 1 from qa_message m
+            where m.tenant_id = #{tenantId} and m.id = #{messageId} and m.del_flag = '0'
+          )
+        order by l.rank_no, l.id
     </select>
 </mapper>

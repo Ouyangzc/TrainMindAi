@@ -5,6 +5,11 @@ import org.apache.ibatis.annotations.Param;
 import com.hezal.system.domain.StudentQaCitation;
 import com.hezal.system.domain.StudentQaMessage;
 import com.hezal.system.domain.StudentQaSession;
+import com.hezal.system.domain.dto.QaObservationDetail;
+import com.hezal.system.domain.dto.QaObservationItem;
+import com.hezal.system.domain.dto.QaObservationQuery;
+import com.hezal.system.domain.dto.QaObservationSummary;
+import com.hezal.system.domain.dto.QaRetrievalTopSource;
 
 /** 学员课程问答持久化。 */
 public interface StudentQaMapper
@@ -30,4 +35,12 @@ public interface StudentQaMapper
             @Param("messageId") Long messageId);
     StudentQaCitation selectCitation(@Param("tenantId") Long tenantId,
             @Param("messageId") Long messageId, @Param("citationId") Long citationId);
+    QaObservationSummary selectQaObservationSummary(@Param("tenantId") Long tenantId,
+            @Param("courseId") Long courseId, @Param("query") QaObservationQuery query);
+    List<QaObservationItem> selectQaObservationList(@Param("tenantId") Long tenantId,
+            @Param("courseId") Long courseId, @Param("query") QaObservationQuery query);
+    QaObservationDetail selectQaObservationDetail(@Param("tenantId") Long tenantId,
+            @Param("courseId") Long courseId, @Param("messageId") Long messageId);
+    List<QaRetrievalTopSource> selectQaRetrievalTopSources(@Param("tenantId") Long tenantId,
+            @Param("messageId") Long messageId);
 }

@@ -426,6 +426,111 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane v-if="canViewObservability" label="AI 问答观测" name="qa-observability">
+        <div class="observation-toolbar">
+          <el-form :model="qaObservationQuery" :inline="true">
+            <el-form-item label="回答状态">
+              <el-select v-model="qaObservationQuery.answerStatus" clearable placeholder="全部" style="width: 170px">
+                <el-option label="有依据回答" value="grounded" />
+                <el-option label="依据不足" value="insufficient_evidence" />
+                <el-option label="服务不可用" value="service_unavailable" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="检索通道">
+              <el-select v-model="qaObservationQuery.retrievalChannel" clearable placeholder="全部" style="width: 160px">
+                <el-option label="混合检索" value="hybrid" />
+                <el-option label="关键词降级" value="keyword_only" />
+                <el-option label="向量检索" value="vector_only" />
+                <el-option label="无结果" value="empty" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="质量标记">
+              <el-select v-model="qaObservationQuery.warningType" clearable placeholder="全部" style="width: 180px">
+                <el-option label="无有效引用" value="NO_VALID_CITATION" />
+                <el-option label="弱引用" value="WEAK_CITATION" />
+                <el-option label="无效引用" value="INVALID_CITATION" />
+                <el-option label="低分拒答" value="LOW_SCORE" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" icon="Search" @click="loadQaObservation">查询</el-button>
+              <el-button icon="Refresh" @click="resetQaObservationQuery">重置</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <div class="observation-metrics">
+          <div class="observation-metric">
+            <span>问题数</span>
+            <strong>{{ qaObservationSummary.questionCount || 0 }}</strong>
+          </div>
+          <div class="observation-metric">
+            <span>依据不足率</span>
+            <strong>{{ rateText(qaObservationSummary.insufficientEvidenceRate) }}</strong>
+          </div>
+          <div class="observation-metric">
+            <span>无有效引用率</span>
+            <strong>{{ rateText(qaObservationSummary.noValidCitationRate) }}</strong>
+          </div>
+          <div class="observation-metric">
+            <span>弱引用率</span>
+            <strong>{{ rateText(qaObservationSummary.weakCitationRate) }}</strong>
+          </div>
+          <div class="observation-metric">
+            <span>降级率</span>
+            <strong>{{ rateText(qaObservationSummary.fallbackRate) }}</strong>
+          </div>
+          <div class="observation-metric">
+            <span>P95耗时</span>
+            <strong>{{ latencyText(qaObservationSummary.p95TotalLatencyMs) }}</strong>
+          </div>
+        </div>
+
+        <el-table v-loading="qaObservationLoading" :data="qaObservationRows">
+          <el-table-column label="问题" min-width="240" :show-overflow-tooltip="true">
+            <template #default="scope">{{ scope.row.question || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="120" align="center">
+            <template #default="scope">
+              <el-tag :type="qaStatusTag(scope.row.answerStatus)">
+                {{ qaStatusLabel(scope.row.answerStatus) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="引用" prop="citationCount" width="80" align="center" />
+          <el-table-column label="Top分" width="90" align="center">
+            <template #default="scope">{{ scoreText(scope.row.topScore) }}</template>
+          </el-table-column>
+          <el-table-column label="检索通道" width="120" align="center">
+            <template #default="scope">{{ retrievalChannelLabel(scope.row.retrievalChannel) }}</template>
+          </el-table-column>
+          <el-table-column label="质量标记" min-width="160" :show-overflow-tooltip="true">
+            <template #default="scope">{{ warningList(scope.row.warningsJson).join(', ') || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="耗时" width="100" align="center">
+            <template #default="scope">{{ latencyText(scope.row.totalLatencyMs) }}</template>
+          </el-table-column>
+          <el-table-column label="时间" prop="createTime" width="170" />
+          <el-table-column label="操作" width="90" align="center">
+            <template #default="scope">
+              <el-button link type="primary" @click="openQaObservationDetail(scope.row.messageId)">详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-if="qaObservationTotal > qaObservationQuery.pageSize"
+          v-model:current-page="qaObservationQuery.pageNum"
+          v-model:page-size="qaObservationQuery.pageSize"
+          class="task-pagination"
+          background
+          layout="total, sizes, prev, pager, next"
+          :page-sizes="[10, 20, 50]"
+          :total="qaObservationTotal"
+          @size-change="handleQaObservationSizeChange"
+          @current-change="handleQaObservationPageChange"
+        />
+      </el-tab-pane>
+
       <el-tab-pane v-if="canViewMembers" label="课程成员" name="members">
         <div class="tab-toolbar">
           <el-button v-hasPermi="['course:member:edit']" type="primary" plain icon="Plus" @click="openMemberDialog()">添加成员</el-button>
@@ -464,6 +569,59 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
+
+    <el-drawer v-model="qaObservationDetailOpen" title="AI 问答观测详情" size="720px" append-to-body>
+      <div v-loading="qaObservationDetailLoading" class="observation-detail">
+        <template v-if="qaObservationDetail">
+          <section>
+            <h3>问答内容</h3>
+            <div class="qa-detail-block">
+              <strong>问题</strong>
+              <p>{{ qaObservationDetail.question || '-' }}</p>
+            </div>
+            <div class="qa-detail-block">
+              <strong>回答</strong>
+              <p>{{ qaObservationDetail.answer || '-' }}</p>
+            </div>
+          </section>
+          <section>
+            <h3>质量信号</h3>
+            <div class="detail-grid">
+              <span>状态：{{ qaStatusLabel(qaObservationDetail.answerStatus) }}</span>
+              <span>检索通道：{{ retrievalChannelLabel(qaObservationDetail.retrievalChannel) }}</span>
+              <span>检索耗时：{{ latencyText(qaObservationDetail.retrievalLatencyMs) }}</span>
+              <span>LLM耗时：{{ latencyText(qaObservationDetail.llmLatencyMs) }}</span>
+              <span>首Token：{{ latencyText(qaObservationDetail.firstTokenMs) }}</span>
+              <span>总耗时：{{ latencyText(qaObservationDetail.totalLatencyMs) }}</span>
+            </div>
+            <div class="warning-line">
+              {{ warningList(qaObservationDetail.warningsJson).join(', ') || '无质量标记' }}
+            </div>
+          </section>
+          <section>
+            <h3>检索 Top3</h3>
+            <div v-for="source in qaObservationDetail.topSources || []" :key="`${source.rankNo}-${source.chunkId}`" class="source-row">
+              <span class="source-rank">{{ source.rankNo }}</span>
+              <span>
+                <strong>{{ source.documentTitle || source.sourceFile || '未知资料' }}</strong>
+                <small>{{ sourceLocation(source) }} · {{ scoreText(source.score) }}</small>
+              </span>
+              <el-tag size="small" :type="source.cited ? 'success' : 'info'">{{ source.cited ? '已引用' : '未引用' }}</el-tag>
+            </div>
+          </section>
+          <section>
+            <h3>最终引用</h3>
+            <div v-for="citation in qaObservationDetail.citations || []" :key="citation.id" class="source-row">
+              <span class="source-rank">{{ citation.rankNo }}</span>
+              <span>
+                <strong>{{ citation.documentTitle }}</strong>
+                <small>{{ sourceLocation(citation) }} · {{ scoreText(citation.score) }}</small>
+              </span>
+            </div>
+          </section>
+        </template>
+      </div>
+    </el-drawer>
 
     <el-dialog :title="moduleDialogTitle" v-model="moduleDialogOpen" width="520px" append-to-body @closed="resetModuleForm">
       <el-form label-width="88px">
@@ -712,12 +870,15 @@ import {
   getKnowledgeBase,
   getKnowledgeBaseBuildStatus,
   getKnowledgeBaseSnapshot,
+  getQaObservationDetail,
+  getQaObservationSummary,
   listCourseMember,
   listCourseDocument,
   listCourseDocumentVersion,
   listCourseModule,
   listKnowledgeBaseBuildTask,
   listKnowledgeBaseVersion,
+  listQaObservation,
   parseCourseDocumentVersion,
   publishKnowledgeBaseVersion,
   rollbackKnowledgeBaseVersion,
@@ -739,6 +900,11 @@ import type {
   KnowledgeBaseBuildTask,
   KnowledgeBaseVersion,
   KnowledgeBaseVersionDocument,
+  QaObservationDetail,
+  QaObservationItem,
+  QaObservationQuery,
+  QaObservationSummary,
+  QaRetrievalTopSource,
   SysUser,
   VersionStatus
 } from '@/types'
@@ -767,6 +933,7 @@ const canEditKnowledge = auth.hasPermi('course:knowledge-base:edit')
 const canPublishKnowledge = auth.hasPermi('course:knowledge-base:publish')
 const canViewMembers = auth.hasPermi('course:member:list')
 const canEditMembers = auth.hasPermi('course:member:edit')
+const canViewObservability = auth.hasPermi('course:course:query')
 const course = ref<Course>()
 const activeTab = ref('basic')
 const selectedModuleKey = ref('all')
@@ -823,6 +990,13 @@ const transferringOwner = ref(false)
 const courseEditOpen = ref(false)
 const savingCourseEdit = ref(false)
 const courseEditFormRef = ref()
+const qaObservationLoading = ref(false)
+const qaObservationSummary = ref<QaObservationSummary>({})
+const qaObservationRows = ref<QaObservationItem[]>([])
+const qaObservationTotal = ref(0)
+const qaObservationDetailOpen = ref(false)
+const qaObservationDetailLoading = ref(false)
+const qaObservationDetail = ref<QaObservationDetail>()
 const versionRows = ref<Array<{
   id: number
   versionNo: string
@@ -836,6 +1010,13 @@ const documentQuery = reactive({
   keyword: '',
   documentType: '',
   versionStatus: '' as VersionStatus | ''
+})
+const qaObservationQuery = reactive<QaObservationQuery>({
+  pageNum: 1,
+  pageSize: 10,
+  answerStatus: '',
+  retrievalChannel: '',
+  warningType: ''
 })
 
 const uploadForm = reactive({
@@ -930,6 +1111,67 @@ function moduleDocumentCount(moduleId?: number) {
   return courseDocuments.value.filter((item: CourseDocument) => item.moduleId === moduleId).length
 }
 
+function qaStatusLabel(status?: string) {
+  const labels: Record<string, string> = {
+    grounded: '有依据',
+    insufficient_evidence: '依据不足',
+    service_unavailable: '不可用',
+    completed: '完成',
+    pending: '处理中'
+  }
+  return status ? labels[status] || status : '-'
+}
+
+function qaStatusTag(status?: string) {
+  if (status === 'grounded' || status === 'completed') return 'success'
+  if (status === 'insufficient_evidence') return 'warning'
+  if (status === 'service_unavailable') return 'danger'
+  return 'info'
+}
+
+function retrievalChannelLabel(value?: string) {
+  const labels: Record<string, string> = {
+    hybrid: '混合',
+    keyword_only: '关键词',
+    vector_only: '向量',
+    empty: '无结果'
+  }
+  return value ? labels[value] || value : '-'
+}
+
+function warningList(value?: string) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function rateText(value?: number) {
+  if (value === undefined || value === null) return '0%'
+  return `${(Number(value) * 100).toFixed(1)}%`
+}
+
+function latencyText(value?: number) {
+  if (value === undefined || value === null) return '-'
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}s`
+  return `${value}ms`
+}
+
+function scoreText(value?: number) {
+  if (value === undefined || value === null) return '-'
+  return Number(value).toFixed(3)
+}
+
+function sourceLocation(source: QaRetrievalTopSource | { pageStart?: number; sectionTitle?: string }) {
+  const locations = []
+  if (source.sectionTitle) locations.push(source.sectionTitle)
+  if (source.pageStart) locations.push(`第 ${source.pageStart} 页`)
+  return locations.join(' · ') || '未记录位置'
+}
+
 function formatFileSize(size?: number) {
   if (!size) {
     return '-'
@@ -967,6 +1209,53 @@ function loadDetail() {
   }
   if (canViewMembers) {
     loadMembers()
+  }
+}
+
+async function loadQaObservation() {
+  if (!canViewObservability) return
+  qaObservationLoading.value = true
+  try {
+    const [summaryResponse, listResponse] = await Promise.all([
+      getQaObservationSummary(courseId.value, qaObservationQuery),
+      listQaObservation(courseId.value, qaObservationQuery)
+    ])
+    qaObservationSummary.value = summaryResponse.data || {}
+    qaObservationRows.value = listResponse.rows || []
+    qaObservationTotal.value = listResponse.total || 0
+  } finally {
+    qaObservationLoading.value = false
+  }
+}
+
+function resetQaObservationQuery() {
+  qaObservationQuery.pageNum = 1
+  qaObservationQuery.answerStatus = ''
+  qaObservationQuery.retrievalChannel = ''
+  qaObservationQuery.warningType = ''
+  loadQaObservation()
+}
+
+function handleQaObservationSizeChange(size: number) {
+  qaObservationQuery.pageSize = size
+  qaObservationQuery.pageNum = 1
+  loadQaObservation()
+}
+
+function handleQaObservationPageChange(page: number) {
+  qaObservationQuery.pageNum = page
+  loadQaObservation()
+}
+
+async function openQaObservationDetail(messageId: number) {
+  qaObservationDetailOpen.value = true
+  qaObservationDetailLoading.value = true
+  qaObservationDetail.value = undefined
+  try {
+    const response = await getQaObservationDetail(courseId.value, messageId)
+    qaObservationDetail.value = response.data
+  } finally {
+    qaObservationDetailLoading.value = false
   }
 }
 
@@ -1685,6 +1974,12 @@ function goBack() {
   router.push('/course')
 }
 
+watch(activeTab, (value: string) => {
+  if (value === 'qa-observability' && !qaObservationRows.value.length) {
+    loadQaObservation()
+  }
+})
+
 loadDetail()
 
 onBeforeUnmount(() => {
@@ -1803,6 +2098,123 @@ onBeforeUnmount(() => {
 
   .tab-toolbar.compact {
     margin-top: -2px;
+  }
+
+  .observation-toolbar {
+    padding: 12px 14px 0;
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    background: #fff;
+    margin-bottom: 12px;
+  }
+
+  .observation-metrics {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .observation-metric {
+    min-height: 78px;
+    padding: 13px 14px;
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    background: #fff;
+  }
+
+  .observation-metric span {
+    display: block;
+    margin-bottom: 8px;
+    color: #606266;
+    font-size: 12px;
+  }
+
+  .observation-metric strong {
+    color: #1f2d3d;
+    font-size: 22px;
+  }
+
+  .observation-detail section {
+    margin-bottom: 20px;
+  }
+
+  .observation-detail h3 {
+    margin: 0 0 10px;
+    color: #1f2d3d;
+    font-size: 15px;
+  }
+
+  .qa-detail-block {
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    background: #fff;
+  }
+
+  .qa-detail-block strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #606266;
+    font-size: 12px;
+  }
+
+  .qa-detail-block p {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: 1.7;
+  }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+    color: #606266;
+    font-size: 13px;
+  }
+
+  .warning-line {
+    color: #8a6d3b;
+    font-size: 13px;
+  }
+
+  .source-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #ebeef5;
+  }
+
+  .source-row > span:nth-child(2) {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .source-row strong,
+  .source-row small {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .source-row small {
+    margin-top: 4px;
+    color: #909399;
+  }
+
+  .source-rank {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    color: #337ecc;
+    background: #ecf5ff;
+    font-size: 12px;
   }
 
   .document-layout {

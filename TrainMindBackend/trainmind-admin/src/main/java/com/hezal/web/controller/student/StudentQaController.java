@@ -2,6 +2,7 @@ package com.hezal.web.controller.student;
 
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import com.hezal.common.core.controller.BaseController;
 import com.hezal.common.core.domain.AjaxResult;
 import com.hezal.system.domain.dto.StudentQaQuestionRequest;
@@ -62,6 +64,17 @@ public class StudentQaController extends BaseController
     {
         return success(studentQaService.ask(
                 courseId, sessionId, getUserId(), request.getQuestion()));
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @PostMapping(value = "/sessions/{sessionId}/messages/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public StreamingResponseBody askStream(@PathVariable Long courseId, @PathVariable Long sessionId,
+            @Valid @RequestBody StudentQaQuestionRequest request)
+    {
+        Long userId = getUserId();
+        return outputStream -> studentQaService.askStream(
+                courseId, sessionId, userId, request.getQuestion(), outputStream);
     }
 
     @PreAuthorize("isAuthenticated()")

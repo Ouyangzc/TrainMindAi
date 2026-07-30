@@ -3,6 +3,11 @@
 from pydantic import BaseModel
 
 
+class QaHistoryTurn(BaseModel):
+    user: str
+    assistant: str
+
+
 class QaAnswerRequest(BaseModel):
     user_id: int
     course_id: int
@@ -10,10 +15,13 @@ class QaAnswerRequest(BaseModel):
     session_id: int
     message_id: int
     question: str
+    prompt_version: str | None = None
+    history: list[QaHistoryTurn] = []
 
 
 class QaSource(BaseModel):
     chunk_id: int
+    source_index: int | None = None
     document_id: int
     document_version_id: int
     source_file: str | None = None
@@ -28,5 +36,6 @@ class QaAnswerResponse(BaseModel):
     answer_status: str
     knowledge_base_version_id: int
     sources: list[QaSource] = []
+    warnings: list[str] = []
     reject_reason: str | None = None
     retrieval_log_ref: int | None = None

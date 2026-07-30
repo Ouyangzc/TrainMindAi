@@ -16,6 +16,7 @@ class QaRetrievalLog(Base, PkMixin, CreatedAtMixin):
     normalized_query: Mapped[str | None] = mapped_column(Text)
     keyword_query: Mapped[str | None] = mapped_column(Text)
     semantic_query: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(String(16))
     retrieval_strategy: Mapped[str | None] = mapped_column(String(64))
     knowledge_base_version_id: Mapped[int | None] = mapped_column(BigInteger)
     chunk_id: Mapped[int | None] = mapped_column(BigInteger)  # 弱引用，不设 FK
@@ -48,3 +49,30 @@ class ModelCallLog(Base, PkMixin, CreatedAtMixin):
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     error_code: Mapped[str | None] = mapped_column(String(64))
     error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class QaAnswerObservation(Base, PkMixin, CreatedAtMixin):
+    __tablename__ = "qa_answer_observation"
+
+    course_id: Mapped[int | None] = mapped_column(BigInteger)
+    session_id: Mapped[int | None] = mapped_column(BigInteger)
+    message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    knowledge_base_version_id: Mapped[int | None] = mapped_column(BigInteger)
+    retrieval_log_ref: Mapped[int | None] = mapped_column(BigInteger)
+    model_call_log_ref: Mapped[int | None] = mapped_column(BigInteger)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    language: Mapped[str | None] = mapped_column(String(16))
+    retrieval_channel: Mapped[str | None] = mapped_column(String(16))
+    answer_status: Mapped[str | None] = mapped_column(String(32))
+    reject_reason: Mapped[str | None] = mapped_column(String(64))
+    warnings: Mapped[list | None] = mapped_column(JSONB)
+    source_count: Mapped[int | None] = mapped_column(Integer)
+    cited_source_count: Mapped[int | None] = mapped_column(Integer)
+    invalid_citation_count: Mapped[int | None] = mapped_column(Integer)
+    weak_citation_count: Mapped[int | None] = mapped_column(Integer)
+    no_valid_citation: Mapped[bool | None] = mapped_column(Boolean)
+    top_score: Mapped[float | None] = mapped_column(Numeric(8, 6))
+    retrieval_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    llm_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    first_token_ms: Mapped[int | None] = mapped_column(Integer)
+    total_latency_ms: Mapped[int | None] = mapped_column(Integer)

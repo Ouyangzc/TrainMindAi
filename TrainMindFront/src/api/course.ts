@@ -18,7 +18,11 @@ import type {
   KnowledgeBaseResult,
   KnowledgeBaseSnapshotResult,
   KnowledgeBaseVersionListResult,
-  KnowledgeBaseVersionResult
+  KnowledgeBaseVersionResult,
+  QaObservationDetailResult,
+  QaObservationListResult,
+  QaObservationQuery,
+  QaObservationSummaryResult
 } from '@/types'
 
 export function listCourse(query: CourseQueryParams): Promise<CourseListResult> {
@@ -264,4 +268,36 @@ export function delCourseMember(courseId: number, memberId: number): Promise<Aja
 
 export function transferCourseOwner(courseId: number, targetUserId: number): Promise<CourseMemberResult> {
   return request({ url: `/course/${courseId}/owner/transfer`, method: 'put', data: { targetUserId } })
+}
+
+export function getQaObservationSummary(
+  courseId: number,
+  query?: QaObservationQuery
+): Promise<QaObservationSummaryResult> {
+  return request({
+    url: `/course/${courseId}/qa-observability/summary`,
+    method: 'get',
+    params: query
+  })
+}
+
+export function listQaObservation(
+  courseId: number,
+  query: QaObservationQuery
+): Promise<QaObservationListResult> {
+  return request({
+    url: `/course/${courseId}/qa-observability/list`,
+    method: 'get',
+    params: query
+  })
+}
+
+export function getQaObservationDetail(
+  courseId: number,
+  messageId: number
+): Promise<QaObservationDetailResult> {
+  return request({
+    url: `/course/${courseId}/qa-observability/${messageId}`,
+    method: 'get'
+  })
 }

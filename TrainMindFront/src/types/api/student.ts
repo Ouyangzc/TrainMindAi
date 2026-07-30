@@ -81,6 +81,42 @@ export type StudentQaSessionResult = AjaxResult<StudentQaSession>
 export type StudentQaMessageListResult = AjaxResult<StudentQaMessage[]>
 export type StudentQaMessageResult = AjaxResult<StudentQaMessage>
 
+export type StudentQaStreamEventName = 'metadata' | 'token' | 'sources' | 'error' | 'done'
+
+export interface StudentQaStreamSource {
+  sourceIndex?: number
+  chunkId?: number
+  documentId?: number
+  documentVersionId?: number
+  sourceFile?: string
+  pageStart?: number
+  pageEnd?: number
+  sectionTitle?: string
+  score?: number
+}
+
+export interface StudentQaStreamPayload {
+  token?: string
+  answer?: string
+  answerStatus?: StudentQaMessageStatus
+  knowledgeBaseVersionId?: number
+  sources?: StudentQaStreamSource[]
+  warnings?: string[]
+  rejectReason?: string
+  retrievalLogRef?: number
+  error?: string
+}
+
+export interface StudentQaStreamEvent {
+  event: StudentQaStreamEventName
+  data: StudentQaStreamPayload
+}
+
+export interface StudentQaStreamHandlers {
+  onEvent?: (event: StudentQaStreamEvent) => void
+  signal?: AbortSignal
+}
+
 export interface StudentPublishedDocument {
   documentId: number
   documentVersionId: number
