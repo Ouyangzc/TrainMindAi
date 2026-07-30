@@ -14,6 +14,10 @@ public class KnowledgeBaseBuildTask extends BaseEntity
     private String errorCode;
     private String errorMessage;
     private Integer retryCount;
+    private Long knowledgeBaseVersionId;
+    private String createdAt;
+    private String startedAt;
+    private String finishedAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -31,4 +35,12 @@ public class KnowledgeBaseBuildTask extends BaseEntity
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public Integer getRetryCount() { return retryCount; }
     public void setRetryCount(Integer retryCount) { this.retryCount = retryCount; }
+    public Long getKnowledgeBaseVersionId() { return knowledgeBaseVersionId; }
+    public void setKnowledgeBaseVersionId(Long knowledgeBaseVersionId) { this.knowledgeBaseVersionId = knowledgeBaseVersionId; }
+    public String getCreatedAt() { return createdAt; }
+    public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+    public String getStartedAt() { return startedAt; }
+    public void setStartedAt(String startedAt) { this.startedAt = startedAt; }
+    public String getFinishedAt() { return finishedAt; }
+    public void setFinishedAt(String finishedAt) { this.finishedAt = finishedAt; }
 }

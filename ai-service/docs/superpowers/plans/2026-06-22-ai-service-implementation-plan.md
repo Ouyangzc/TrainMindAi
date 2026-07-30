@@ -2132,6 +2132,45 @@ Expected: all PASS, ≥ 80% coverage
 
 ---
 
+## Task 2.10: Expose Phase 2 build observability in Web
+
+> **Status:** ✅ Completed on 2026-07-30
+>
+> **Scope note:** This is companion work outside the Python AI service runtime. AI service remains the source
+> of build-task state; Java/RuoYi exposes it through course-scoped permissions, and the Vue course detail page
+> renders it for operators.
+>
+> **Verification:**
+> - `UV_CACHE_DIR=/tmp/uv-cache /home/oyang/code/TrainMindAi/repo/.tools/bin/uv run pytest tests/ -q` → 51 passed, 1 warning
+> - `mvn -pl trainmind-admin -am -DskipTests compile` → BUILD SUCCESS
+> - `./node_modules/.bin/vite build` → build completed successfully
+> - `./node_modules/.bin/vue-tsc --noEmit` → failed on existing project-level type issues unrelated to this task (`vue` export resolution, missing `HeaderNotice`, `pwdChrtype`, implicit any in `lock.vue`)
+
+- [x] **Step 1: Complete AI task list payload**
+
+In `ai-service/app/api/internal/v1/kb_tasks.py`, include `knowledge_base_version_id`,
+`error_code`, `error_message`, `retry_count`, `started_at`, and `finished_at` in
+`GET /internal/v1/kb-tasks`.
+
+- [x] **Step 2: Add Java/RuoYi proxy endpoint**
+
+In `TrainMindBackend`, add a course-version-scoped endpoint:
+
+```http
+GET /course/{courseId}/knowledge-base/versions/{versionId}/build-tasks
+```
+
+It validates course management access, normalizes pagination, and proxies to AI service
+`GET /internal/v1/kb-tasks?kb_version_id=...`.
+
+- [x] **Step 3: Add Vue task list UI**
+
+In `TrainMindFront/src/views/course/detail.vue`, replace the single-task description block in
+“知识库治理 / 构建任务” with a refreshable paged table showing status, step, progress,
+retry count, timestamps, and error detail.
+
+---
+
 # Phase 3: Retrieval + RAG Enhancement
 
 ## Task 3.1: SSE streaming Q&A

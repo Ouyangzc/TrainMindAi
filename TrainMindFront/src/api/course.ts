@@ -13,6 +13,7 @@ import type {
   CourseQueryParams,
   CourseResult,
   DocumentParseTaskResult,
+  KnowledgeBaseBuildTaskPageResult,
   KnowledgeBaseBuildTaskResult,
   KnowledgeBaseResult,
   KnowledgeBaseSnapshotResult,
@@ -213,6 +214,18 @@ export function getKnowledgeBaseBuildStatus(
   versionId: number
 ): Promise<KnowledgeBaseBuildTaskResult> {
   return request({ url: `/course/${courseId}/knowledge-base/versions/${versionId}/build-status`, method: 'get' })
+}
+
+export function listKnowledgeBaseBuildTask(
+  courseId: number,
+  versionId: number,
+  query?: { pageNum?: number; pageSize?: number }
+): Promise<KnowledgeBaseBuildTaskPageResult> {
+  return request({
+    url: `/course/${courseId}/knowledge-base/versions/${versionId}/build-tasks`,
+    method: 'get',
+    params: query
+  })
 }
 
 export function publishKnowledgeBaseVersion(

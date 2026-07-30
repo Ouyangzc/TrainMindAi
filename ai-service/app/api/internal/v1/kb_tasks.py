@@ -36,12 +36,19 @@ async def list_tasks(
         items=[
             {
                 "task_id": task.id,
+                "knowledge_base_version_id": task.knowledge_base_version_id,
                 "task_type": task.task_type,
                 "status": task.status,
                 "current_step": task.current_step,
                 "progress": task.progress,
+                "error_code": task.error_code,
+                "error_message": task.error_message,
+                "retry_count": task.retry_count,
                 "created_at": task.created_at.isoformat()
                 if task.created_at
+                else None,
+                "started_at": task.started_at.isoformat()
+                if task.started_at
                 else None,
                 "finished_at": task.finished_at.isoformat()
                 if task.finished_at

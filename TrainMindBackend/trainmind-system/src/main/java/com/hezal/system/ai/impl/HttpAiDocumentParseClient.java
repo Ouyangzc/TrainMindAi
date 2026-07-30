@@ -5,7 +5,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Component;
@@ -19,6 +21,7 @@ import com.hezal.system.ai.config.AiServiceProperties;
 import com.hezal.system.domain.CourseDocumentVersion;
 import com.hezal.system.domain.DocumentParseTask;
 import com.hezal.system.domain.KnowledgeBaseBuildTask;
+import com.hezal.system.domain.KnowledgeBaseBuildTaskPage;
 
 /**
  * 基于HTTP的AI文档解析客户端。
@@ -98,8 +101,37 @@ public class HttpAiDocumentParseClient implements AiDocumentParseClient, AiKnowl
     public KnowledgeBaseBuildTask getBuildTask(Long taskId)
     {
         JsonNode body = send("GET", "/internal/v1/kb-tasks/" + taskId, null);
+        return toBuildTask(body);
+    }
+
+    @Override
+    public KnowledgeBaseBuildTaskPage listBuildTasks(Long knowledgeBaseVersionId, int page, int size)
+    {
+        JsonNode body = send("GET", "/internal/v1/kb-tasks?kb_version_id="
+                + knowledgeBaseVersionId + "&page=" + page + "&size=" + size, null);
+        List<KnowledgeBaseBuildTask> rows = new ArrayList<>();
+        JsonNode items = body.path("items");
+        if (items.isArray())
+        {
+            for (JsonNode item : items)
+            {
+                rows.add(toBuildTask(item));
+            }
+        }
+
+        KnowledgeBaseBuildTaskPage result = new KnowledgeBaseBuildTaskPage();
+        result.setRows(rows);
+        result.setTotal(body.path("total").isNumber() ? body.path("total").asLong() : 0L);
+        result.setPage(body.path("page").isNumber() ? body.path("page").asInt() : page);
+        result.setPageSize(body.path("page_size").isNumber() ? body.path("page_size").asInt() : size);
+        return result;
+    }
+
+    private KnowledgeBaseBuildTask toBuildTask(JsonNode body)
+    {
         KnowledgeBaseBuildTask task = new KnowledgeBaseBuildTask();
         task.setId(requiredLong(body, "task_id"));
+        task.setKnowledgeBaseVersionId(longValue(body, "knowledge_base_version_id"));
         task.setTaskType(text(body, "task_type"));
         task.setStatus(requiredText(body, "status"));
         task.setCurrentStep(text(body, "current_step"));
@@ -107,6 +139,9 @@ public class HttpAiDocumentParseClient implements AiDocumentParseClient, AiKnowl
         task.setErrorCode(text(body, "error_code"));
         task.setErrorMessage(text(body, "error_message"));
         task.setRetryCount(body.path("retry_count").isNumber() ? body.path("retry_count").asInt() : 0);
+        task.setCreatedAt(text(body, "created_at"));
+        task.setStartedAt(text(body, "started_at"));
+        task.setFinishedAt(text(body, "finished_at"));
         return task;
     }
 
@@ -168,6 +203,12 @@ public class HttpAiDocumentParseClient implements AiDocumentParseClient, AiKnowl
             throw new ServiceException("AI服务响应缺少字段：" + field);
         }
         return body.path(field).asLong();
+    }
+
+    private Long longValue(JsonNode body, String field)
+    {
+        JsonNode value = body.path(field);
+        return value.isIntegralNumber() ? value.asLong() : null;
     }
 
     private String requiredText(JsonNode body, String field)

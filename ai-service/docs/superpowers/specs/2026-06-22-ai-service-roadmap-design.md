@@ -295,9 +295,9 @@ Phase 1 后，资料解析任务已经从 `ai.kb_build_task` 拆出，落在 Jav
 #### 2.7 管道进度可观测性
 
 - Worker 在每步关键节点上报 `current_step` 和 `progress`
-- AI service 提供后端观测接口和运维指标；RuoYi 管理端页面展示不在本仓库代码范围内，
-  但应通过 `GET /internal/v1/kb-tasks/{id}`、`GET /internal/v1/kb-tasks` 接入进度、
-  状态、失败原因和重试入口
+- AI service 提供后端观测接口和运维指标；Java/RuoYi 管理端通过受课程权限保护的
+  `GET /course/{courseId}/knowledge-base/versions/{versionId}/build-tasks` 接入任务列表、
+  进度、状态、失败原因和重试次数展示
 - 在 `pyproject.toml` 添加依赖 `prometheus-client>=0.21`；新增 `app/core/metrics.py` 定义指标：
   - `kb_build_tasks_total{status}` — 任务总数
   - `kb_build_tasks_running` — 运行中
@@ -305,7 +305,9 @@ Phase 1 后，资料解析任务已经从 `ai.kb_build_task` 拆出，落在 Jav
   - `kb_build_tasks_failed_total{error_code}` — 按错误码分类
 - 在 FastAPI 挂载 `/metrics` 端点
 
-**验收标准**: `GET /internal/v1/kb-tasks/{id}` 返回准确进度；根路径 `/metrics` 包含上述指标且不依赖 internal token；文档明确页面展示由 Java/RuoYi 管理端后续接入
+**验收标准**: `GET /internal/v1/kb-tasks/{id}` 返回准确进度；`GET /internal/v1/kb-tasks`
+列表包含错误、重试和时间字段；根路径 `/metrics` 包含上述指标且不依赖 internal token；
+课程详情“知识库治理 / 构建任务”可查看任务列表并手动刷新
 
 #### 2.8 管道 API 增强
 

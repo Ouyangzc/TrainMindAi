@@ -92,6 +92,17 @@ public class KnowledgeBaseController extends BaseController
         return success(knowledgeBaseService.selectBuildStatus(courseId, versionId, getUsername()));
     }
 
+    @PreAuthorize("@ss.hasPermi('course:knowledge-base:query')")
+    @GetMapping("/versions/{versionId}/build-tasks")
+    public AjaxResult buildTasks(@PathVariable Long courseId, @PathVariable Long versionId,
+            Integer pageNum, Integer pageSize)
+    {
+        courseAccessService.requireManageAccess(courseId, getUserId());
+        int page = pageNum == null ? 1 : pageNum;
+        int size = pageSize == null ? 10 : pageSize;
+        return success(knowledgeBaseService.selectBuildTasks(courseId, versionId, page, size, getUsername()));
+    }
+
     @PreAuthorize("@ss.hasPermi('course:knowledge-base:publish')")
     @Log(title = "知识库发布", businessType = BusinessType.UPDATE)
     @PostMapping("/versions/{versionId}/publish")

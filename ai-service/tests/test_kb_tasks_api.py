@@ -36,6 +36,7 @@ async def test_list_tasks_filters_by_kb_version(
 ) -> None:
     captured: dict = {}
     created_at = datetime(2026, 7, 30, 10, 0, tzinfo=UTC)
+    started_at = datetime(2026, 7, 30, 10, 1, tzinfo=UTC)
     finished_at = datetime(2026, 7, 30, 10, 5, tzinfo=UTC)
 
     class FakeTaskRepo:
@@ -57,6 +58,8 @@ async def test_list_tasks_filters_by_kb_version(
                     status="success",
                     current_step="embedding_index_ready",
                     progress=100,
+                    retry_count=1,
+                    started_at=started_at,
                     created_at=created_at,
                     finished_at=finished_at,
                 )
@@ -74,11 +77,16 @@ async def test_list_tasks_filters_by_kb_version(
         "items": [
             {
                 "task_id": 7,
+                "knowledge_base_version_id": 5,
                 "task_type": "build_knowledge_base_version",
                 "status": "success",
                 "current_step": "embedding_index_ready",
                 "progress": 100,
+                "error_code": None,
+                "error_message": None,
+                "retry_count": 1,
                 "created_at": "2026-07-30T10:00:00+00:00",
+                "started_at": "2026-07-30T10:01:00+00:00",
                 "finished_at": "2026-07-30T10:05:00+00:00",
             }
         ],

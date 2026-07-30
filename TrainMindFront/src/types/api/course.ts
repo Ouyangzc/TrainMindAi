@@ -139,10 +139,24 @@ export interface KnowledgeBaseVersionDocument extends BaseEntity {
 
 export interface KnowledgeBaseBuildTask extends BaseEntity {
   id?: number
+  knowledgeBaseVersionId?: number
+  taskType?: string
   status?: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
   currentStep?: string
   progress?: number
+  errorCode?: string
   errorMessage?: string
+  retryCount?: number
+  createdAt?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface KnowledgeBaseBuildTaskPage {
+  rows: KnowledgeBaseBuildTask[]
+  total: number
+  page: number
+  pageSize: number
 }
 
 export interface CourseMember extends BaseEntity {
@@ -168,5 +182,6 @@ export type KnowledgeBaseVersionResult = AjaxResult<KnowledgeBaseVersion>
 export type KnowledgeBaseVersionListResult = AjaxResult<KnowledgeBaseVersion[]>
 export type KnowledgeBaseSnapshotResult = AjaxResult<KnowledgeBaseVersionDocument[]>
 export type KnowledgeBaseBuildTaskResult = AjaxResult<KnowledgeBaseBuildTask>
+export type KnowledgeBaseBuildTaskPageResult = AjaxResult<KnowledgeBaseBuildTaskPage>
 export type CourseMemberListResult = AjaxResult<CourseMember[]>
 export type CourseMemberResult = AjaxResult<CourseMember>

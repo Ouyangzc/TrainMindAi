@@ -13,6 +13,7 @@ import com.hezal.system.domain.Course;
 import com.hezal.system.domain.CourseDocumentVersion;
 import com.hezal.system.domain.KnowledgeBase;
 import com.hezal.system.domain.KnowledgeBaseBuildTask;
+import com.hezal.system.domain.KnowledgeBaseBuildTaskPage;
 import com.hezal.system.domain.KnowledgeBaseVersion;
 import com.hezal.system.domain.KnowledgeBaseVersionDocument;
 import com.hezal.system.mapper.CourseMapper;
@@ -183,6 +184,16 @@ public class KnowledgeBaseServiceImpl implements IKnowledgeBaseService
                     task.getId(), null, username);
         }
         return task;
+    }
+
+    @Override
+    public KnowledgeBaseBuildTaskPage selectBuildTasks(
+            Long courseId, Long versionId, int page, int size, String username)
+    {
+        requireVersion(courseId, versionId, username);
+        int normalizedPage = Math.max(page, 1);
+        int normalizedSize = Math.min(Math.max(size, 1), 50);
+        return aiKnowledgeBaseClient.listBuildTasks(versionId, normalizedPage, normalizedSize);
     }
 
     @Override

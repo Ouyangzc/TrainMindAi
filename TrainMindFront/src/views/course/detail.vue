@@ -329,18 +329,69 @@
               <el-empty v-else description="暂无活动草稿，请先创建草稿版本" />
             </el-tab-pane>
             <el-tab-pane label="构建任务" name="tasks">
-              <el-descriptions v-if="knowledgeBuildTask" :column="2" border>
-                <el-descriptions-item label="任务编号">{{ knowledgeBuildTask.id }}</el-descriptions-item>
-                <el-descriptions-item label="任务状态">{{ knowledgeBuildTask.status }}</el-descriptions-item>
-                <el-descriptions-item label="当前步骤">{{ knowledgeBuildTask.currentStep || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="进度">
-                  <el-progress :percentage="knowledgeBuildTask.progress || 0" />
-                </el-descriptions-item>
-                <el-descriptions-item v-if="knowledgeBuildTask.errorMessage" label="错误信息" :span="2">
-                  {{ knowledgeBuildTask.errorMessage }}
-                </el-descriptions-item>
-              </el-descriptions>
-              <el-empty v-else description="暂无构建任务" />
+              <div class="tab-toolbar task-toolbar">
+                <span class="task-version">
+                  {{ taskKnowledgeVersion ? `版本 V${taskKnowledgeVersion.versionNo}` : '暂无版本' }}
+                </span>
+                <el-button
+                  icon="Refresh"
+                  :loading="knowledgeTaskLoading"
+                  :disabled="!taskKnowledgeVersion?.id"
+                  @click="loadKnowledgeBuildTasks()"
+                >刷新</el-button>
+              </div>
+              <el-table
+                v-loading="knowledgeTaskLoading"
+                :data="knowledgeBuildTasks"
+                empty-text="暂无构建任务"
+              >
+                <el-table-column label="任务编号" prop="id" width="100" />
+                <el-table-column label="状态" width="110" align="center">
+                  <template #default="scope">
+                    <el-tag :type="buildTaskStatusTag(scope.row.status)">
+                      {{ buildTaskStatusLabel(scope.row.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="当前步骤" min-width="190">
+                  <template #default="scope">{{ scope.row.currentStep || '-' }}</template>
+                </el-table-column>
+                <el-table-column label="进度" width="180">
+                  <template #default="scope">
+                    <el-progress :percentage="scope.row.progress || 0" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="重试" prop="retryCount" width="80" align="center" />
+                <el-table-column label="创建时间" width="180">
+                  <template #default="scope">{{ formatTaskTime(scope.row.createdAt) }}</template>
+                </el-table-column>
+                <el-table-column label="开始时间" width="180">
+                  <template #default="scope">{{ formatTaskTime(scope.row.startedAt) }}</template>
+                </el-table-column>
+                <el-table-column label="完成时间" width="180">
+                  <template #default="scope">{{ formatTaskTime(scope.row.finishedAt) }}</template>
+                </el-table-column>
+                <el-table-column label="错误" min-width="220" show-overflow-tooltip>
+                  <template #default="scope">
+                    <span v-if="scope.row.errorCode || scope.row.errorMessage">
+                      {{ [scope.row.errorCode, scope.row.errorMessage].filter(Boolean).join(' / ') }}
+                    </span>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <el-pagination
+                v-if="knowledgeTaskTotal > knowledgeTaskQuery.pageSize"
+                v-model:current-page="knowledgeTaskQuery.pageNum"
+                v-model:page-size="knowledgeTaskQuery.pageSize"
+                class="task-pagination"
+                background
+                layout="total, sizes, prev, pager, next"
+                :page-sizes="[10, 20, 50]"
+                :total="knowledgeTaskTotal"
+                @size-change="handleKnowledgeTaskSizeChange"
+                @current-change="handleKnowledgeTaskPageChange"
+              />
             </el-tab-pane>
             <el-tab-pane label="版本历史" name="versions">
               <el-table :data="knowledgeVersions">
@@ -665,6 +716,7 @@ import {
   listCourseDocument,
   listCourseDocumentVersion,
   listCourseModule,
+  listKnowledgeBaseBuildTask,
   listKnowledgeBaseVersion,
   parseCourseDocumentVersion,
   publishKnowledgeBaseVersion,
@@ -744,12 +796,19 @@ const knowledgeVersions = ref<KnowledgeBaseVersion[]>([])
 const knowledgeSnapshot = ref<KnowledgeBaseVersionDocument[]>([])
 const selectedSnapshotIds = ref<number[]>([])
 const knowledgeBuildTask = ref<KnowledgeBaseBuildTask>()
+const knowledgeBuildTasks = ref<KnowledgeBaseBuildTask[]>([])
+const knowledgeTaskTotal = ref(0)
+const knowledgeTaskLoading = ref(false)
 const knowledgeLoading = ref(false)
 const creatingDraft = ref(false)
 const savingSnapshot = ref(false)
 const buildingKnowledge = ref(false)
 const publishingKnowledge = ref(false)
 const knowledgeTab = ref('draft')
+const knowledgeTaskQuery = reactive({
+  pageNum: 1,
+  pageSize: 10
+})
 const snapshotTableRef = ref()
 const buildPollTimers = new Map<number, ReturnType<typeof setTimeout>>()
 const courseMembers = ref<CourseMember[]>([])
@@ -811,6 +870,9 @@ const activeKnowledgeVersion = computed(() =>
 )
 const publishedKnowledgeVersion = computed(() =>
   knowledgeVersions.value.find((item: KnowledgeBaseVersion) => item.id === knowledgeBase.value?.currentVersionId)
+)
+const taskKnowledgeVersion = computed(() =>
+  activeKnowledgeVersion.value || publishedKnowledgeVersion.value || knowledgeVersions.value[0]
 )
 const transferableMembers = computed(() =>
   courseMembers.value.filter((item: CourseMember) => item.accessRole !== 'owner' && item.accessStatus === 'active')
@@ -1253,6 +1315,33 @@ function knowledgeStatusTag(status?: string) {
   } as Record<string, 'success' | 'warning' | 'info' | 'danger'>)[status || ''] || 'info'
 }
 
+function buildTaskStatusLabel(status?: string) {
+  return ({
+    pending: '等待中',
+    running: '构建中',
+    success: '成功',
+    failed: '失败',
+    cancelled: '已取消'
+  } as Record<string, string>)[status || ''] || '-'
+}
+
+function buildTaskStatusTag(status?: string) {
+  return ({
+    pending: 'info',
+    running: 'warning',
+    success: 'success',
+    failed: 'danger',
+    cancelled: 'info'
+  } as Record<string, 'success' | 'warning' | 'info' | 'danger'>)[status || ''] || 'info'
+}
+
+function formatTaskTime(value?: string) {
+  if (!value) {
+    return '-'
+  }
+  return value.replace('T', ' ').replace(/\.\d+/, '').replace(/\+00:00$/, ' UTC')
+}
+
 async function loadKnowledge() {
   knowledgeLoading.value = true
   try {
@@ -1263,6 +1352,7 @@ async function loadKnowledge() {
     knowledgeBase.value = baseResponse.data
     knowledgeVersions.value = versionsResponse.data || []
     const active = activeKnowledgeVersion.value
+    const taskVersion = taskKnowledgeVersion.value
     if (active?.id) {
       await loadKnowledgeSnapshot(active.id)
       if (active.status === 'building') {
@@ -1272,9 +1362,45 @@ async function loadKnowledge() {
       knowledgeSnapshot.value = []
       selectedSnapshotIds.value = []
     }
+    if (taskVersion?.id) {
+      await loadKnowledgeBuildTasks(taskVersion.id)
+    } else {
+      knowledgeBuildTasks.value = []
+      knowledgeBuildTask.value = undefined
+      knowledgeTaskTotal.value = 0
+    }
   } finally {
     knowledgeLoading.value = false
   }
+}
+
+async function loadKnowledgeBuildTasks(versionId = taskKnowledgeVersion.value?.id) {
+  if (!versionId) {
+    knowledgeBuildTasks.value = []
+    knowledgeBuildTask.value = undefined
+    knowledgeTaskTotal.value = 0
+    return
+  }
+  knowledgeTaskLoading.value = true
+  try {
+    const response = await listKnowledgeBaseBuildTask(courseId.value, versionId, knowledgeTaskQuery)
+    knowledgeBuildTasks.value = response.data?.rows || []
+    knowledgeTaskTotal.value = response.data?.total || 0
+    knowledgeBuildTask.value = knowledgeBuildTasks.value[0]
+  } finally {
+    knowledgeTaskLoading.value = false
+  }
+}
+
+function handleKnowledgeTaskSizeChange(size: number) {
+  knowledgeTaskQuery.pageSize = size
+  knowledgeTaskQuery.pageNum = 1
+  loadKnowledgeBuildTasks()
+}
+
+function handleKnowledgeTaskPageChange(page: number) {
+  knowledgeTaskQuery.pageNum = page
+  loadKnowledgeBuildTasks()
 }
 
 async function loadKnowledgeSnapshot(versionId: number) {
@@ -1333,6 +1459,7 @@ async function pollKnowledgeBuild(versionId: number) {
   try {
     const response = await getKnowledgeBaseBuildStatus(courseId.value, versionId)
     knowledgeBuildTask.value = response.data
+    await loadKnowledgeBuildTasks(versionId)
     if (response.data?.status === 'success') {
       await loadKnowledge()
       proxy?.$modal.msgSuccess('知识库构建完成，可以发布')
@@ -1356,6 +1483,7 @@ async function buildKnowledge() {
   try {
     const response = await buildKnowledgeBaseVersion(courseId.value, versionId)
     knowledgeBuildTask.value = response.data
+    knowledgeTaskQuery.pageNum = 1
     knowledgeTab.value = 'tasks'
     await loadKnowledge()
     pollKnowledgeBuild(versionId)
@@ -1668,6 +1796,7 @@ onBeforeUnmount(() => {
 
   .tab-toolbar {
     display: flex;
+    align-items: center;
     gap: 8px;
     margin-bottom: 10px;
   }
@@ -1738,6 +1867,21 @@ onBeforeUnmount(() => {
     display: block;
     margin-top: 4px;
     color: #1f2d3d;
+  }
+
+  .task-toolbar {
+    justify-content: space-between;
+  }
+
+  .task-version {
+    color: #606266;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .task-pagination {
+    justify-content: flex-end;
+    margin-top: 12px;
   }
 
   .muted {
